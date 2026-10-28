@@ -11,6 +11,7 @@ import tempfile
 import threading
 import time
 import unittest
+import xml.etree.ElementTree as ET
 import urllib.error
 import urllib.request
 
@@ -194,6 +195,73 @@ class MinifluxSamples(unittest.TestCase):
                                       user='fixture-user', password='fixture-user-password-321')[0], 404)
         self.assertEqual(self.request('DELETE', f'/v1/categories/{cid}')[0], 204)
         self.assertEqual(self.request('DELETE', f'/v1/categories/{cid}')[0], 404)
+
+    def test_opml_import_export_and_partial_failure(self):
+        username, password = 'fixture-opml', 'fixture-opml-password-321'
+        status, _ = self.request('POST', '/v1/users',
+                                 {'username': username, 'password': password, 'is_admin': False})
+        self.assertEqual(status, 201)
+        credentials = {'user': username, 'password': password}
+        opml = (b'<opml version="2.0"><body><outline text="Technology">'
+                b'<outline text="Alpha" xmlUrl="https://example.invalid/a.xml" '
+                b'htmlUrl="https://example.invalid/a"/>'
+                b'<outline text="Nested"><outline text="Beta" '
+                b'xmlUrl="https://example.invalid/b.xml"/></outline></outline>'
+                b'<outline text="Loose" xmlUrl="https://example.invalid/loose.xml"/>'
+                b'</body></opml>')
+        for _ in range(2):
+            status, body = self.request('POST', '/v1/import', raw=opml, **credentials)
+            self.assertEqual((status, body['message']), (201, 'Feeds imported successfully'))
+        status, feeds = self.request('GET', '/v1/feeds', **credentials)
+        self.assertEqual(status, 200)
+        observed = {feed['feed_url']: (feed['title'], feed['category']['title']) for feed in feeds}
+        self.assertEqual(observed, {
+            'https://example.invalid/a.xml': ('Alpha', 'Technology'),
+            'https://example.invalid/b.xml': ('Beta', 'Nested'),
+            'https://example.invalid/loose.xml': ('Loose', 'All'),
+        })
+        self.assertEqual(len(feeds), 3)
+        self.assertEqual(self.request('GET', '/v1/entries', **credentials)[1]['total'], 0)
+
+        auth = base64.b64encode(f'{username}:{password}'.encode()).decode()
+        request = urllib.request.Request(self.base + '/v1/export',
+                                         headers={'Authorization': 'Basic ' + auth})
+        with urllib.request.urlopen(request, timeout=10) as response:
+            self.assertEqual(response.status, 200)
+            self.assertTrue(response.headers['Content-Type'].startswith('text/xml'))
+            exported = response.read()
+            document = ET.fromstring(exported)
+        self.assertEqual((document.tag, document.get('version')), ('opml', '2.0'))
+        groups = {group.get('text'): {item.get('xmlUrl') for item in group.findall('outline')}
+                  for group in document.findall('./body/outline')}
+        self.assertEqual(groups, {'All': {'https://example.invalid/loose.xml'},
+                                  'Nested': {'https://example.invalid/b.xml'},
+                                  'Technology': {'https://example.invalid/a.xml'}})
+        second = {'user': 'fixture-opml-second', 'password': 'fixture-second-password-321'}
+        self.assertEqual(self.request('POST', '/v1/users',
+                                      {'username': second['user'], 'password': second['password'],
+                                       'is_admin': False})[0], 201)
+        self.assertEqual(self.request('POST', '/v1/import', raw=exported, **second)[0], 201)
+        status, second_feeds = self.request('GET', '/v1/feeds', **second)
+        self.assertEqual(status, 200)
+        self.assertEqual({feed['feed_url']: (feed['title'], feed['category']['title'])
+                          for feed in second_feeds}, observed)
+        self.assertTrue({feed['id'] for feed in feeds}.isdisjoint(
+                        {feed['id'] for feed in second_feeds}))
+
+        invalid = (b'<opml><body><outline text="First" xmlUrl="https://example.invalid/first.xml"/>'
+                   b'<outline text="Failures"><outline text="Bad" '
+                   b'xmlUrl="ftp://example.invalid/bad"/></outline></body></opml>')
+        self.assertEqual(self.request('POST', '/v1/import', raw=invalid, **credentials)[0], 500)
+        status, feeds = self.request('GET', '/v1/feeds', **credentials)
+        self.assertEqual(status, 200)
+        self.assertIn('https://example.invalid/first.xml', [feed['feed_url'] for feed in feeds])
+        self.assertNotIn('ftp://example.invalid/bad', [feed['feed_url'] for feed in feeds])
+        status, categories = self.request('GET', '/v1/categories', **credentials)
+        self.assertEqual(status, 200)
+        self.assertIn('Failures', [category['title'] for category in categories])
+        self.assertEqual(self.request('POST', '/v1/import', raw=b'not xml', **credentials)[0], 500)
+        self.assertEqual(self.request('GET', '/v1/feeds', user=None)[0], 401)
 
     def test_feed_create_read_refresh_and_remove(self):
         status, category = self.request('POST', '/v1/categories', {'title': 'Fixture feeds'})
