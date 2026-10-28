@@ -2,7 +2,7 @@
 
 Small, reproducible black-box comparisons for selected contracts in the [Recipkg standard library](https://github.com/recipkg/standard-library). The tests run candidate executables on disposable input and assert user-visible results. They do **not** establish full compatibility, source provenance, secure isolation, or independent reconstruction.
 
-These tests currently correspond to selected observations in `recipkg/jq` v0.1.0 (upstream jq 1.8.2), `recipkg/ripgrep` v0.1.0 (upstream ripgrep 15.2.0) and `recipkg/ffmpeg` v0.1.3 (upstream FFmpeg 9.0.2); upstream builds may differ in codecs or features. Git is required for ripgrep's repository filtering test; FFmpeg needs lavfi, Matroska and PCM support. jq/ripgrep/FFmpeg/ffprobe are not bundled dependencies.
+These tests currently correspond to selected observations in `recipkg/jq` v0.1.0 (upstream jq 1.8.2), `recipkg/ripgrep` v0.1.0 (upstream ripgrep 15.2.0), `recipkg/ffmpeg` v0.1.3 (upstream FFmpeg 9.0.2), and `recipkg/miniflux` v0.1.2 (upstream source commit `3945f3daa0a90040f761d79a5f62a678fe86ba4e`); upstream builds may differ in codecs or features. Git is required for ripgrep's repository filtering test; FFmpeg needs lavfi, Matroska and PCM support. jq/ripgrep/FFmpeg/ffprobe are not bundled dependencies.
 
 Run locally with Python 3.11+:
 
@@ -10,6 +10,12 @@ Run locally with Python 3.11+:
 python3 -m unittest discover -s tests -v
 ```
 
-Set `RECIPKG_TEST_JQ`, `RECIPKG_TEST_RG`, `RECIPKG_TEST_GIT`, `RECIPKG_TEST_FFMPEG`, and `RECIPKG_TEST_FFPROBE` to executable paths to compare a reconstruction. Unavailable executables skip their test class and are reported as skipped: a skipped class is not a pass. The harness prints target version output; record executable provenance, build configuration and platform separately. Temporary fixtures are deleted after each test. It does not connect to a model or use the user's repositories.
+Set `RECIPKG_TEST_JQ`, `RECIPKG_TEST_RG`, `RECIPKG_TEST_GIT`, `RECIPKG_TEST_FFMPEG`, and `RECIPKG_TEST_FFPROBE` to executable paths to compare a reconstruction. Unavailable executables skip their test class and are reported as skipped: a skipped class is not a pass. The harness prints target version output; record executable provenance, build configuration and platform separately. Temporary fixtures are cleaned up after tests unless a test database fails to stop. It does not connect to a model or use the user's repositories.
 
 When a case fails, compare the fixed upstream recipe, version, environment, and stderr before changing expected behavior. Add tests for newly observed cases and retain unresolved differences. The tests live outside Markdown-only recipe archives.
+
+Miniflux samples require an explicitly supplied `RECIPKG_TEST_MINIFLUX` binary plus local PostgreSQL `initdb` and `pg_ctl`. They initialize a temporary trust-auth database accessible only via its private Unix socket, start Miniflux and a fixture RSS server on loopback, and create disposable accounts. The test explicitly enables private-network fetching only for the fixture. It shuts down only those processes; temporary database files are preserved if shutdown cannot be verified. Do not point these tests at a real server or production database. Without the variable, the Miniflux tests are skipped.
+
+```sh
+RECIPKG_TEST_MINIFLUX=/absolute/path/to/miniflux python3 -m unittest discover -s tests -p test_miniflux.py -v
+```
