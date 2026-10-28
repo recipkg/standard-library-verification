@@ -14,10 +14,12 @@ import unittest
 import wave
 
 
-def executable(variable, default):
+def executable(variable, default, *, required=False):
     name = os.environ.get(variable, default)
     path = shutil.which(name)
     if path is None:
+        if variable in os.environ or required:
+            raise RuntimeError(f"required executable not found: {name!r} ({variable})")
         raise unittest.SkipTest(f"missing executable: {name} ({variable})")
     return path
 
@@ -140,7 +142,7 @@ class RipgrepSamples(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.rg = executable('RECIPKG_TEST_RG', 'rg')
-        cls.git = executable('RECIPKG_TEST_GIT', 'git')
+        cls.git = executable('RECIPKG_TEST_GIT', 'git', required='RECIPKG_TEST_RG' in os.environ)
         print('ripgrep target:', command([cls.rg, '--version']).stdout.splitlines()[0])
 
     def setUp(self):
@@ -313,8 +315,11 @@ class RipgrepSamples(unittest.TestCase):
 class FFmpegSamples(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        selected = [name in os.environ for name in ('RECIPKG_TEST_FFMPEG', 'RECIPKG_TEST_FFPROBE')]
+        if any(selected) and not all(selected):
+            raise RuntimeError('set both RECIPKG_TEST_FFMPEG and RECIPKG_TEST_FFPROBE for candidate testing')
         cls.ffmpeg = executable('RECIPKG_TEST_FFMPEG', 'ffmpeg')
-        cls.ffprobe = executable('RECIPKG_TEST_FFPROBE', 'ffprobe')
+        cls.ffprobe = executable('RECIPKG_TEST_FFPROBE', 'ffprobe', required=any(selected))
         print('ffmpeg target:', command([cls.ffmpeg, '-version']).stdout.splitlines()[0])
         print('ffprobe target:', command([cls.ffprobe, '-version']).stdout.splitlines()[0])
 
