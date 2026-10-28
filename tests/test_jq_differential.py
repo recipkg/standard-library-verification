@@ -8,6 +8,49 @@ import unittest
 
 
 class JqDifferential(unittest.TestCase):
+    def test_number_literals_and_arithmetic_exact_output(self):
+        target = os.environ.get('RECIPKG_TEST_JQ')
+        reference = os.environ.get('RECIPKG_TEST_JQ_REFERENCE')
+        if not target and not reference:
+            self.skipTest('set RECIPKG_TEST_JQ and RECIPKG_TEST_JQ_REFERENCE')
+        if not target or not reference:
+            self.fail('both target and reference must be specified')
+        target, reference = shutil.which(target), shutil.which(reference)
+        self.assertIsNotNone(target, 'jq target not found')
+        self.assertIsNotNone(reference, 'jq reference not found')
+        self.assertNotEqual(os.path.realpath(target), os.path.realpath(reference))
+
+        def compare(source, expression):
+            results = []
+            for executable in (reference, target):
+                result = subprocess.run([executable, '-c', expression], input=source.encode(),
+                                        capture_output=True, timeout=10)
+                self.assertEqual((result.returncode, result.stderr), (0, b''))
+                results.append(result.stdout)
+            self.assertEqual(results[0], results[1], (source, expression))
+
+        rng = random.Random(3182)
+        for _ in range(100):
+            digits = ''.join(str(rng.randrange(10)) for _ in range(rng.randrange(1, 40)))
+            fraction = ('.' + ''.join(str(rng.randrange(10))
+                                       for _ in range(rng.randrange(1, 9))) if rng.randrange(2) else '')
+            source = rng.choice(['', '-']) + digits + fraction + rng.choice(['', f'e{rng.randint(-50, 50)}'])
+            with self.subTest(source=source):
+                compare(source, '.')
+
+        rng = random.Random(3183)
+        def number():
+            digits = ''.join(str(rng.randrange(10)) for _ in range(rng.randrange(1, 20)))
+            fraction = ('.' + ''.join(str(rng.randrange(10))
+                                       for _ in range(rng.randrange(1, 6))) if rng.randrange(2) else '')
+            return rng.choice(['', '-']) + digits + fraction + rng.choice(['', f'e{rng.randint(-20, 20)}'])
+
+        for _ in range(100):
+            source = '{"a":' + number() + ',"b":' + number() + '}'
+            for expression in ('[.a==.b,.a<.b]', '[.a+.b,.a-.b,.a*.b]'):
+                with self.subTest(source=source, expression=expression):
+                    compare(source, expression)
+
     def test_json_relaxed_literals_and_nested_unicode(self):
         target = os.environ.get('RECIPKG_TEST_JQ')
         reference = os.environ.get('RECIPKG_TEST_JQ_REFERENCE')

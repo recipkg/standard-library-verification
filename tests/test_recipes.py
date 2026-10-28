@@ -433,6 +433,41 @@ class JqSamples(unittest.TestCase):
                 output = subprocess.run([self.jq, '-c', '.'], input=source, capture_output=True, timeout=30)
                 self.assertEqual((output.returncode, output.stdout, output.stderr), (0, expected, b''))
 
+    def test_decnum_mixed_behavior(self):
+        capability = self.invoke(['-n', 'have_decnum'])
+        self.assertEqual(capability.returncode, 0, capability.stderr)
+        if capability.stdout.strip() == 'false':
+            self.skipTest('samples require a target built with decnum')
+        self.assertEqual(capability.stdout.strip(), 'true')
+        cases = [
+            (['-cn', '[1.00,-0.0,1e2,1e9999,1e-9999]'], b'',
+             b'[1.00,0.0,1E+2,1E+9999,1E-9999]\n'),
+            (['-cn', '[1.00+0,1.5+2,1.2*3,1-2,0.1+0.2]'], b'',
+             b'[1,3.5,3.5999999999999996,-1,0.30000000000000004]\n'),
+            (['-cn', '[1e9999>1e9998,1e-9999>0,9007199254740993>9007199254740992]'], b'',
+             b'[true,true,true]\n'),
+            (['-c', '[(.+0)==9007199254740993,.==9007199254740993]'], b'9007199254740993',
+             b'[true,true]\n'),
+            (['-cn', '["1.00"|tonumber,"9007199254740993"|tonumber]'], b'',
+             b'[1.00,9007199254740993]\n'),
+            (['-cn', '[(-1.00),(-0.00)]'], b'', b'[-1.00,0.00]\n'),
+            (['-cn', '[1e15+0,1e16+0,1.1e16+0,1.23e18+0,1e-4+0,1e-5+0]'], b'',
+             b'[1000000000000000,1e+16,11000000000000000,1.23e+18,0.0001,1e-05]\n'),
+            (['-c', '.a*.b'], b'{"a":06865777.75,"b":901171616219061.5e-2}',
+             b'61872440315683720000\n'),
+            (['-cn', '[1e9999+1e9999,1e9999-1e9999]'], b'',
+             b'[1.7976931348623157e+308,null]\n'),
+            (['-c', '[.[1.5],.[-1]]'], b'[10,20,30]', b'[20,30]\n'),
+            (['-c', '.'], b'{"n":000.100,"big":1e9999,"negative":-0}',
+             b'{"n":0.100,"big":1E+9999,"negative":-0}\n'),
+            (['-c', '--stream', '.'], b'[1.00,1e9999,-0]',
+             b'[[0],1.00]\n[[1],1E+9999]\n[[2],-0]\n[[2]]\n'),
+        ]
+        for args, source, expected in cases:
+            with self.subTest(args=args, source=source):
+                result = subprocess.run([self.jq, *args], input=source, capture_output=True, timeout=30)
+                self.assertEqual((result.returncode, result.stdout, result.stderr), (0, expected, b''))
+
     def test_json_sequence_error_recovery(self):
         source = b'\x1e1\n\x1e{bad}\n\x1e{"ok":2}\n'
         result = subprocess.run([self.jq, '--seq', '-c', '.'], input=source,
