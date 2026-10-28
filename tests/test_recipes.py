@@ -6,9 +6,11 @@ import json
 import os
 from pathlib import Path
 import shutil
+import struct
 import subprocess
 import tempfile
 import unittest
+import wave
 
 
 def executable(variable, default):
@@ -253,6 +255,67 @@ class FFmpegSamples(unittest.TestCase):
         missing_input = self.ff('-i', 'a.mkv', '-map', '1:a?', '-c:a', 'copy', 'missing-input.mkv', check=False)
         self.assertNotEqual(missing_input.returncode, 0)
         self.assertFalse((self.root / 'missing-input.mkv').exists())
+
+    def wav_samples(self, name):
+        with wave.open(str(self.root / name), 'rb') as audio:
+            self.assertEqual((audio.getnchannels(), audio.getsampwidth(), audio.getframerate()), (1, 2, 8000))
+            data = audio.readframes(audio.getnframes())
+            return struct.unpack('<' + 'h' * (len(data) // 2), data)
+
+    def test_complex_audio_mix_and_split(self):
+        for name, frequency, duration in [('a.wav', 440, '0.25'), ('b.wav', 880, '0.125')]:
+            self.ff('-f', 'lavfi', '-i', f'sine=frequency={frequency}:sample_rate=8000:duration={duration}',
+                    '-c:a', 'pcm_s16le', name)
+        a, b = self.wav_samples('a.wav'), self.wav_samples('b.wav')
+        self.assertEqual((len(a), len(b)), (2000, 1000))
+        self.ff('-i', 'a.wav', '-i', 'b.wav', '-filter_complex',
+                '[0:a]volume=0.5[a0];[1:a]volume=0.5[a1];'
+                '[a0][a1]amix=inputs=2:duration=shortest:normalize=0[mix]',
+                '-map', '[mix]', '-c:a', 'pcm_s16le', 'mix.wav')
+        mix = self.wav_samples('mix.wav')
+        self.assertEqual(len(mix), len(b))
+        self.assertTrue(any(mix), 'mixed signal must not be silent')
+        self.assertLessEqual(max(abs(got - (left + right) / 2)
+                                 for got, left, right in zip(mix, a, b)), 1.0)
+
+        self.ff('-i', 'a.wav', '-filter_complex',
+                '[0:a]asplit=2[a][b];[a]volume=0[sil];[b]volume=1[orig]',
+                '-map', '[sil]', '-c:a', 'pcm_s16le', 'silent.wav',
+                '-map', '[orig]', '-c:a', 'pcm_s16le', 'original.wav')
+        self.assertEqual(self.wav_samples('silent.wav'), (0,) * len(a))
+        self.assertEqual(self.wav_samples('original.wav'), a)
+
+    def test_complex_filter_mapping_failures(self):
+        self.ff('-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=8000:duration=0.1',
+                '-c:a', 'pcm_s16le', 'source.wav')
+        for name, graph, mapping, codec in [
+            ('missing.wav', '[0:a]volume=1[out]', '[missing]', 'pcm_s16le'),
+            ('unconnected.wav', '[0:a]asplit=2[out][unused]', '[out]', 'pcm_s16le'),
+            ('copy.wav', '[0:a]volume=0.5[out]', '[out]', 'copy'),
+        ]:
+            with self.subTest(name=name):
+                result = self.ff('-i', 'source.wav', '-filter_complex', graph,
+                                 '-map', mapping, '-c:a', codec, name, check=False)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertTrue(result.stderr)
+        duplicate = self.ff('-i', 'source.wav', '-filter_complex', '[0:a]volume=1[out]',
+                            '-map', '[out]', 'first.wav', '-map', '[out]', 'second.wav', check=False)
+        self.assertNotEqual(duplicate.returncode, 0)
+        self.assertTrue(duplicate.stderr)
+
+    def test_unlabeled_filter_output_and_explicit_mapping(self):
+        self.ff('-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=8000:duration=0.125',
+                '-c:a', 'pcm_s16le', 'source.wav')
+        self.ff('-i', 'source.wav', '-filter_complex', '[0:a]volume=0',
+                '-c:a', 'pcm_s16le', 'auto.mkv')
+        self.assertEqual(len(self.probe('auto.mkv')), 1)
+        self.ff('-i', 'source.wav', '-filter_complex', '[0:a]volume=0',
+                '-map', '0:a', '-c:a', 'pcm_s16le', 'mapped.mkv')
+        self.assertEqual(len(self.probe('mapped.mkv')), 2)
+        for index in (0, 1):
+            self.ff('-i', 'mapped.mkv', '-map', f'0:a:{index}', '-c:a', 'pcm_s16le', f'track{index}.wav')
+        self.assertEqual(self.wav_samples('track0.wav'), (0,) * 1000)
+        self.assertEqual(self.wav_samples('track1.wav'), self.wav_samples('source.wav'))
 
 
 if __name__ == '__main__':
