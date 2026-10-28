@@ -412,6 +412,36 @@ class JqSamples(unittest.TestCase):
         self.assertEqual((result.returncode, result.stdout), (0, b'\x1e1\n\x1e{"ok":2}\n'))
         self.assertTrue(result.stderr)
 
+    def test_sequence_framing_and_stream_modes(self):
+        cases = [
+            (['--seq', '-c', '.'], b'junk\x1e1\n\x1e2\n', b'\x1e1\n\x1e2\n', False),
+            (['--seq', '-c', '.'], b'1\n', b'', True),
+            (['--seq', '-c', '.'], b'\x1e1\n2\n', b'\x1e1\n\x1e2\n', False),
+            (['--seq', '-c', '.'], b'\x1e\x1e3\n\x1e', b'\x1e3\n', False),
+            (['--seq', '-c', '.'], b'\x1e1', b'', True),
+            (['--seq', '-c', '.'], b'\x1e[1,]\n\x1e42\n', b'\x1e42\n', True),
+            (['--seq', '--stream', '-c', '.'], b'\x1e1', b'\x1e[[],1]\n', False),
+            (['--seq', '--stream', '-c', '.'], b'\x1e[1,]\n\x1e42\n',
+             b'\x1e[[0],1]\n\x1e[[],42]\n', True),
+            (['--seq', '-cs', '.'], b'\x1e1\n\x1e2\n', b'\x1e[1,2]\n', False),
+            (['--seq', '-cn', '[inputs]'], b'\x1e1\n\x1e2\n', b'\x1e[1,2]\n', False),
+            (['--seq', '-cR', '.'], b'abc\nxyz\n', b'\x1e"abc"\n\x1e"xyz"\n', False),
+            (['--seq', '-nrc', '"hi",1'], b'', b'hi\n\x1e1\n', False),
+        ]
+        for args, source, expected, warns in cases:
+            with self.subTest(args=args, source=source):
+                result = subprocess.run([self.jq, *args], input=source, capture_output=True, timeout=30)
+                self.assertEqual((result.returncode, result.stdout), (0, expected))
+                self.assertEqual(bool(result.stderr), warns, result.stderr)
+        result = subprocess.run([self.jq, '--seq', '--stream-errors', '-c', '.'],
+                                input=b'\x1e[1,]\n\x1e42\n', capture_output=True, timeout=30)
+        self.assertEqual((result.returncode, result.stderr), (0, b''))
+        records = [json.loads(line) for line in result.stdout.split(b'\x1e') if line.strip()]
+        self.assertEqual(records[0], [[0], 1])
+        self.assertTrue(records[1][0])
+        self.assertEqual(records[1][1], [1])
+        self.assertEqual(records[2], [[], 42])
+
 
 class RipgrepSamples(unittest.TestCase):
     @classmethod
@@ -627,6 +657,58 @@ class FFmpegSamples(unittest.TestCase):
                 '-ac:a:0', '1', '-ac:a:1', '2',
                 '-disposition:a:0', 'default' if first_default else '0',
                 '-disposition:a:1', '0' if first_default else 'default', name)
+
+    def test_probe_json_sections_and_stream_selection(self):
+        self.ff('-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=8000:duration=0.25',
+                '-f', 'lavfi', '-i', 'sine=frequency=660:sample_rate=16000:duration=0.25',
+                '-map', '0:a', '-map', '1:a', '-c:a', 'pcm_s16le',
+                '-metadata', 'title=Probe Sample', '-metadata:s:a:0', 'language=eng',
+                '-metadata:s:a:1', 'language=jpn', '-disposition:a:0', 'default',
+                '-disposition:a:1', '0', 'probe.mkv')
+
+        def inspect(*args, name='probe.mkv', level='error'):
+            return command([self.ffprobe, '-v', level, *args, '-of', 'json', name], cwd=self.root)
+
+        fields = 'stream=index,codec_name,sample_rate,channels:stream_tags=language:stream_disposition=default'
+        result = inspect('-show_entries', fields)
+        self.assertEqual((result.returncode, result.stderr), (0, ''))
+        data = json.loads(result.stdout)
+        expected = [
+            {'index': 0, 'codec_name': 'pcm_s16le', 'sample_rate': '8000', 'channels': 1,
+             'disposition': {'default': 1}, 'tags': {'language': 'eng'}},
+            {'index': 1, 'codec_name': 'pcm_s16le', 'sample_rate': '16000', 'channels': 1,
+             'disposition': {'default': 0}, 'tags': {'language': 'jpn'}},
+        ]
+        self.assertEqual(data, {'programs': [], 'stream_groups': [], 'streams': expected})
+        selected = inspect('-select_streams', 'a:1', '-show_entries', fields)
+        self.assertEqual((selected.returncode, selected.stderr), (0, ''))
+        self.assertEqual(json.loads(selected.stdout)['streams'], [expected[1]])
+        for selector in ('v', 'a:5'):
+            with self.subTest(selector=selector):
+                empty = inspect('-select_streams', selector, '-show_entries', 'stream=index')
+                self.assertEqual((empty.returncode, empty.stderr), (0, ''))
+                self.assertEqual(json.loads(empty.stdout)['streams'], [])
+        invalid = inspect('-select_streams', 'a:bogus', '-show_entries', 'stream=index')
+        self.assertNotEqual(invalid.returncode, 0)
+        self.assertTrue(invalid.stderr)
+        format_result = inspect('-show_entries', 'format=format_name,duration:format_tags=title')
+        self.assertEqual((format_result.returncode, format_result.stderr), (0, ''))
+        self.assertEqual(json.loads(format_result.stdout),
+                         {'format': {'format_name': 'matroska,webm', 'duration': '0.250000',
+                                     'tags': {'title': 'Probe Sample'}}})
+        self.assertEqual(json.loads(inspect('-show_entries', 'stream=').stdout), {})
+        unknown = inspect('-show_entries', 'stream=index,unknown_field')
+        self.assertEqual((unknown.returncode, unknown.stderr), (0, ''))
+        self.assertEqual(json.loads(unknown.stdout)['streams'], [{'index': 0}, {'index': 1}])
+        for level in ('error', 'quiet'):
+            with self.subTest(level=level):
+                missing = inspect('-show_error', name='missing.mkv', level=level)
+                self.assertNotEqual(missing.returncode, 0)
+                error = json.loads(missing.stdout)['error']
+                self.assertIsInstance(error['code'], int)
+                self.assertLess(error['code'], 0)
+                self.assertTrue(error['string'])
+                self.assertEqual(bool(missing.stderr), level == 'error')
 
     def test_audio_default_and_copy(self):
         for first_default in (True, False):

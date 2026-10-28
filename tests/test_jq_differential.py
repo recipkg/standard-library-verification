@@ -8,6 +8,39 @@ import unittest
 
 
 class JqDifferential(unittest.TestCase):
+    def test_sequence_recovery_and_stream_modes(self):
+        target = os.environ.get('RECIPKG_TEST_JQ')
+        reference = os.environ.get('RECIPKG_TEST_JQ_REFERENCE')
+        if not target and not reference:
+            self.skipTest('set RECIPKG_TEST_JQ and RECIPKG_TEST_JQ_REFERENCE')
+        if not target or not reference:
+            self.fail('both target and reference must be specified')
+        target, reference = shutil.which(target), shutil.which(reference)
+        self.assertIsNotNone(target, 'jq target not found')
+        self.assertIsNotNone(reference, 'jq reference not found')
+        self.assertNotEqual(os.path.realpath(target), os.path.realpath(reference))
+        rng = random.Random(2403)
+        segments = ['1\n', '-2\n', 'null\n', '[1,2]\n', '{"x":[true,{}]}\n',
+                    '[1,]\n', '{"bad":?}\n', '[]\n', '"hello"\n']
+        for _ in range(24):
+            source = 'ignored' + ''.join('\x1e' + rng.choice(segments)
+                                         for _ in range(rng.randrange(2, 6)))
+            for option in ([], ['--stream'], ['--stream-errors']):
+                with self.subTest(source=source, option=option):
+                    outputs = []
+                    for exe in (reference, target):
+                        run = subprocess.run([exe, '--seq', '-c', *option, '.'], input=source,
+                                             text=True, capture_output=True, timeout=10)
+                        self.assertEqual(run.returncode, 0, run.stderr)
+                        records = [json.loads(part) for part in run.stdout.split('\x1e') if part.strip()]
+                        if option == ['--stream-errors']:
+                            for record in records:
+                                if isinstance(record, list) and len(record) == 2 and isinstance(record[0], str):
+                                    self.assertTrue(record[0])
+                                    record[0] = '<error>'
+                        outputs.append((records, bool(run.stderr)))
+                    self.assertEqual(outputs[0], outputs[1])
+
     def test_json_stream_records(self):
         target = os.environ.get('RECIPKG_TEST_JQ')
         reference = os.environ.get('RECIPKG_TEST_JQ_REFERENCE')
