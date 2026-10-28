@@ -125,6 +125,15 @@ class OpenHandsServerSamples(unittest.TestCase):
                     time.sleep(0.1)
                 self.fail('conversation did not finish')
 
+            def session_probe(mode, conversation_id, events, snapshot=None):
+                probe = Path(__file__).with_name('openhands_session_probe.py').resolve()
+                data = json.dumps({'mode': mode, 'port': port, 'conversation_id': conversation_id,
+                                   'events': events, 'snapshot': snapshot})
+                result = subprocess.run([executable, str(probe)], cwd=temp, env=env, input=data,
+                                        capture_output=True, text=True, timeout=90)
+                self.assertEqual(result.returncode, 0, result.stdout[-3000:] + result.stderr[-3000:])
+                return json.loads(result.stdout)
+
             with (root / 'server.log').open('w+') as log:
                 process = start(log)
                 try:
@@ -169,6 +178,7 @@ class OpenHandsServerSamples(unittest.TestCase):
                     wait_for_finish(initial_id)
                     self.assertEqual(len(model.requests), 2)
                     self.assertIn('initial fixture', str(model.requests[-1][1]['messages']))
+                    session_snapshot = session_probe('snapshot', conversation_id, before['items'])
                 finally:
                     stop(process)
 
@@ -180,6 +190,12 @@ class OpenHandsServerSamples(unittest.TestCase):
                     self.assertEqual(status, 200)
                     self.assertEqual([e['id'] for e in after['items']], [e['id'] for e in before['items']])
                     self.assertEqual(request('/api/conversations/count')[1], 2)
+                    result = session_probe('verify', conversation_id, after['items'], session_snapshot)
+                    self.assertIn('passed', result['result'])
+                    wait_for_finish(conversation_id)
+                    self.assertEqual(len(model.requests), 3)
+                    status, after = request(f'/api/conversations/{conversation_id}/events/search')
+                    self.assertEqual(status, 200)
                     probe = Path(__file__).with_name('openhands_websocket_probe.py').resolve()
                     ws_input = json.dumps({'port': port, 'conversation_id': conversation_id,
                                            'events': after['items']})
@@ -188,7 +204,7 @@ class OpenHandsServerSamples(unittest.TestCase):
                     self.assertEqual(result.returncode, 0, result.stdout[-3000:] + result.stderr[-3000:])
                     self.assertIn('websocket authentication, replay and live messaging passed', result.stdout)
                     wait_for_finish(conversation_id)
-                    self.assertEqual(len(model.requests), 3)
+                    self.assertEqual(len(model.requests), 4)
                     status, live = request(f'/api/conversations/{conversation_id}/events/search')
                     self.assertEqual(status, 200)
                     self.assertTrue(any('websocket fixture message' in json.dumps(e) for e in live['items']))
