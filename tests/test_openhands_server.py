@@ -180,6 +180,18 @@ class OpenHandsServerSamples(unittest.TestCase):
                     self.assertEqual(status, 200)
                     self.assertEqual([e['id'] for e in after['items']], [e['id'] for e in before['items']])
                     self.assertEqual(request('/api/conversations/count')[1], 2)
+                    probe = Path(__file__).with_name('openhands_websocket_probe.py').resolve()
+                    ws_input = json.dumps({'port': port, 'conversation_id': conversation_id,
+                                           'events': after['items']})
+                    result = subprocess.run([executable, str(probe)], cwd=temp, env=env, input=ws_input,
+                                            capture_output=True, text=True, timeout=90)
+                    self.assertEqual(result.returncode, 0, result.stdout[-3000:] + result.stderr[-3000:])
+                    self.assertIn('websocket authentication, replay and live messaging passed', result.stdout)
+                    wait_for_finish(conversation_id)
+                    self.assertEqual(len(model.requests), 3)
+                    status, live = request(f'/api/conversations/{conversation_id}/events/search')
+                    self.assertEqual(status, 200)
+                    self.assertTrue(any('websocket fixture message' in json.dumps(e) for e in live['items']))
                     missing = str(uuid.uuid4())
                     self.assertEqual(request(f'/api/conversations/{missing}')[0], 404)
                     self.assertEqual(request(f'/api/conversations/{conversation_id}', method='DELETE')[0], 200)
