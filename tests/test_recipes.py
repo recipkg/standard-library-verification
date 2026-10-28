@@ -165,6 +165,40 @@ class JqSamples(unittest.TestCase):
         self.assertEqual((result.returncode, result.stdout), (3, ''))
         self.assertTrue(result.stderr)
 
+    def test_function_argument_and_scope_boundaries(self):
+        cases = [
+            ('def f($a; $b): [$a,$b,.]; f((1,2);(3,4))', 10,
+             [[1, 3, 10], [1, 4, 10], [2, 3, 10], [2, 4, 10]]),
+            ('def f(x;y): [x,y]; f((.+1);(.*2))', 3, [[4, 6]]),
+            ('10 as $x | def f: $x; 20 as $x | f', 0, [10]),
+            ('def f: 1; def g(x): f+x; def f: 9; g(f)', 0, [10]),
+            ('def f(x): def g: x; .+1|g; f(.*2)', 3, [8]),
+            ('def f($x): $x; f(empty)', 3, []),
+            ('def f: missing; 1', None, [1]),
+            ('def f(x): 1; f(error("bad"))', None, [1]),
+            ('def f(x): 10 as $x | x; 3 as $x | f($x)', None, [3]),
+            ('def f($x): def g: $x; 20 as $x | g; f(10)', None, [10]),
+            ('def f: missing; def f: 2; f', None, [2]),
+        ]
+        for expression, source, expected in cases:
+            with self.subTest(expression=expression):
+                result = self.invoke(['-c', expression], json.dumps(source))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual([json.loads(line) for line in result.stdout.splitlines()], expected)
+                self.assertEqual(result.stderr, '')
+        for expression in ('def f(x): x; empty|f', 'def f: missing; f',
+                           'def f: g; def g: 1; f'):
+            with self.subTest(expression=expression):
+                result = self.invoke(['-c', expression], '')
+                self.assertEqual((result.returncode, result.stdout), (3, ''))
+                self.assertTrue(result.stderr)
+        for expression, stdout in [('def f($x): 1; f(error("bad"))', ''),
+                                   ('def f(x): (1,x); f(error("bad"))', '1\n')]:
+            with self.subTest(expression=expression):
+                result = self.invoke(['-c', expression], 'null')
+                self.assertEqual((result.returncode, result.stdout), (5, stdout))
+                self.assertIn('bad', result.stderr)
+
     def test_binding_and_reduction_boundaries(self):
         cases = [
             ('[.[] as [$a,$b] | [$a,$b]]', [[1], [], [3, 4, 5]], [[[1, None], [None, None], [3, 4]]]),
