@@ -124,6 +124,47 @@ class JqSamples(unittest.TestCase):
         self.assertEqual((result.returncode, result.stdout), (5, ''))
         self.assertIn('bad', result.stderr)
 
+    def test_bindings_functions_and_reductions(self):
+        cases = [
+            ('.[] as $x | [$x, .]', [1, 2], [[1, [1, 2]], [2, [1, 2]]]),
+            ('.foo as $x | .bar | [$x,.]', {'foo': 1, 'bar': 2}, [[1, 2]]),
+            ('(.+1) as $x | (.*2) as $x | [$x,.]', 5, [[10, 5]]),
+            ('.[] as [$a,$b] | [$a,$b,.]', [[1], [1, 2], [3, 4, 5]],
+             [[1, None, [[1], [1, 2], [3, 4, 5]]],
+              [1, 2, [[1], [1, 2], [3, 4, 5]]], [3, 4, [[1], [1, 2], [3, 4, 5]]]]),
+            ('.[] as {$a,$b} | [$a,$b,.]', [{'a': 1}, {'b': 2}],
+             [[1, None, [{'a': 1}, {'b': 2}]], [None, 2, [{'a': 1}, {'b': 2}]]]),
+            ('def foo(f): f|f; 5|foo(.*2)', None, [20]),
+            ('def f(x): [x,x]; f((1,2))', None, [[1, 2, 1, 2]]),
+            ('def f($x): [$x,$x]; f((1,2))', None, [[1, 1], [2, 2]]),
+            ('def f: 1; def f: 2; f', None, [2]),
+            ('def f: 1; def f(x): x+1; [f, f(2)]', None, [[1, 3]]),
+            ('def f: .+1; def g: f; def f: .+10; [g,f]', 0, [[1, 10]]),
+            ('def fact: if .==0 then 1 else . * ((.-1)|fact) end; fact', 5, [120]),
+            ('reduce .[] as $x (0; .+$x)', [1, 2, 3], [6]),
+            ('reduce .[] as $x (0; .+$x)', [], [0]),
+            ('reduce .[] as [$a,$b] (0; .+$a*$b)', [[1, 2], [3, 4]], [14]),
+            ('reduce .[] as $x (0; (.+$x, .+100))', [1, 2], [200]),
+            ('reduce .[] as $x (0; empty)', [1, 2], [None]),
+            ('foreach .[] as $x (0; .+$x)', [1, 2, 3], [1, 3, 6]),
+            ('foreach .[] as $x (0; .+$x; [$x,.])', [1, 2, 3], [[1, 1], [2, 3], [3, 6]]),
+            ('foreach .[] as $x (0; .+$x)', [], []),
+            ('foreach .[] as $x (0; (.+$x, .+100))', [1, 2], [1, 100, 102, 200]),
+        ]
+        for expression, source, expected in cases:
+            with self.subTest(expression=expression, source=source):
+                result = self.invoke(['-c', expression], json.dumps(source))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                actual = [json.loads(line) for line in result.stdout.splitlines()]
+                self.assertEqual(json.dumps(actual, sort_keys=True), json.dumps(expected, sort_keys=True))
+                self.assertEqual(result.stderr, '')
+        result = self.invoke(['-c', '(. as $x | .+1) | $x'], '5')
+        self.assertEqual((result.returncode, result.stdout), (3, ''))
+        self.assertTrue(result.stderr)
+        result = self.invoke(['-c', 'reduce .[] as $x ((0,10); .+$x)'], '[1,2]')
+        self.assertEqual((result.returncode, result.stdout), (5, '3\n'))
+        self.assertTrue(result.stderr)
+
     def test_stream_records_and_parse_failure(self):
         result = self.invoke(['-c', '--stream', '.'], '["a",["b"]]')
         self.assertEqual(result.returncode, 0, result.stderr)
