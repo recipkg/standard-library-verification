@@ -89,6 +89,41 @@ class JqSamples(unittest.TestCase):
                 self.assertEqual(json.loads(result.stdout), expected)
                 self.assertEqual(result.stderr, '')
 
+    def test_conditions_alternatives_and_comparisons(self):
+        cases = [
+            ('[.[] | if . then "yes" else "no" end]',
+             [False, None, 0, '', [], {}], [['no', 'no', 'yes', 'yes', 'yes', 'yes']]),
+            ('if (true,false) then "T" else "F" end', 'original', ['T', 'F']),
+            ('if empty then 1 else 2 end', None, []),
+            ('if false then 1 end', {'x': 1}, [{'x': 1}]),
+            ('if (1,2) then . else 0 end', {'x': 1}, [{'x': 1}, {'x': 1}]),
+            ('[(false,null,0,"",[],{}) // "default"]', None, [[0, '', [], {}]]),
+            ('[(false,null,empty) // (1,2)]', None, [[1, 2]]),
+            ('[false, true // "default"]', None, [[False, True]]),
+            ('[(false,true) // "default"]', None, [[True]]),
+            ('[(false,null,true) | . // "default"]', None, [['default', 'default', True]]),
+            ('[(true,false) and (true,false)]', None, [[True, False, False]]),
+            ('[(false,true) or (true,false)]', None, [[True, False, True]]),
+            ('false and error("bad")', None, [False]),
+            ('true or error("bad")', None, [True]),
+            ('[(null,false,0,"",[],{}) | not]', None, [[True, True, False, False, False, False]]),
+            ('[1 == "1",1==1.0,{"a":1,"b":2} == {"b":2,"a":1}]', None,
+             [[False, True, True]]),
+            ('[{},true,[],0,false,"a",null] | sort', None, [[None, False, True, 0, 'a', [], {}]]),
+            ('[[1,2] < [1,3], {"a":1} < {"b":0}, 1 < "0"]', None, [[True, True, True]]),
+            ('[(1,2) < (2,3)]', None, [[True, False, True, True]]),
+        ]
+        for expression, source, expected in cases:
+            with self.subTest(expression=expression):
+                result = self.invoke(['-c', expression], json.dumps(source))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                actual = [json.loads(line) for line in result.stdout.splitlines()]
+                self.assertEqual(json.dumps(actual, sort_keys=True), json.dumps(expected, sort_keys=True))
+                self.assertEqual(result.stderr, '')
+        result = self.invoke(['-c', 'true and error("bad")'], 'null')
+        self.assertEqual((result.returncode, result.stdout), (5, ''))
+        self.assertIn('bad', result.stderr)
+
     def test_stream_records_and_parse_failure(self):
         result = self.invoke(['-c', '--stream', '.'], '["a",["b"]]')
         self.assertEqual(result.returncode, 0, result.stderr)
