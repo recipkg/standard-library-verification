@@ -84,6 +84,54 @@ class JqSamples(unittest.TestCase):
                 self.assertEqual(json.loads(result.stdout), expected)
                 self.assertEqual(result.stderr, '')
 
+    def test_stream_records_and_parse_failure(self):
+        result = self.invoke(['-c', '--stream', '.'], '["a",["b"]]')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([json.loads(line) for line in result.stdout.splitlines()],
+                         [[[0], 'a'], [[1, 0], 'b'], [[1, 0]], [[1]]])
+        malformed = '["a",n]'
+        result = self.invoke(['-c', '--stream', '.'], malformed)
+        self.assertEqual(result.returncode, 5)
+        self.assertEqual(json.loads(result.stdout), [[0], 'a'])
+        self.assertTrue(result.stderr)
+        result = self.invoke(['-c', '--stream-errors', '.'], malformed)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        records = [json.loads(line) for line in result.stdout.splitlines()]
+        self.assertEqual(records[0], [[0], 'a'])
+        self.assertEqual(records[1][1], [1])
+        self.assertIsInstance(records[1][0], str)
+        self.assertTrue(records[1][0])
+        self.assertEqual(result.stderr, '')
+
+    def test_raw_inputs_and_nul_output(self):
+        for args, expected in [(['-Rc', '.'], '"hello"\n""\n"world"\n'),
+                               (['-Rsc', '.'], '"hello\\n\\nworld"\n')]:
+            result = self.invoke(args, 'hello\n\nworld')
+            self.assertEqual((result.returncode, result.stdout, result.stderr), (0, expected, ''))
+        result = self.invoke(['-n', '--raw-output0', '"a\\nb",42'])
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, 'a\nb\0' + '42\0', ''))
+        result = self.invoke(['-n', '--raw-output0', '"bad\\u0000text"'])
+        self.assertEqual((result.returncode, result.stdout), (5, ''))
+        self.assertTrue(result.stderr)
+
+    def test_input_consumption_and_multiple_files(self):
+        result = self.invoke(['-cn', '[inputs]'], '1 2 3')
+        self.assertEqual((result.returncode, result.stdout), (0, '[1,2,3]\n'))
+        result = self.invoke(['-c', '[inputs]'], '1 2 3')
+        self.assertEqual((result.returncode, result.stdout), (0, '[2,3]\n'))
+        with tempfile.TemporaryDirectory(prefix='recipkg-jq-files-') as tmp:
+            root = Path(tmp)
+            (root / 'a.json').write_text('1\n2\n', encoding='utf-8')
+            (root / 'b.json').write_text('4\n', encoding='utf-8')
+            result = command([self.jq, '-c', '.', 'a.json', '-', 'b.json'], cwd=root, input='3\n')
+            self.assertEqual((result.returncode, result.stdout, result.stderr), (0, '1\n2\n3\n4\n', ''))
+            result = command([self.jq, '-c', '.', 'missing.json', 'b.json'], cwd=root, input='')
+            self.assertEqual((result.returncode, result.stdout), (2, '4\n'))
+            self.assertTrue(result.stderr)
+        for data, expected in [('true\nfalse\n', 1), ('false\ntrue\n', 0)]:
+            result = self.invoke(['-ce', '.'], data)
+            self.assertEqual((result.returncode, result.stdout, result.stderr), (expected, data, ''))
+
 
 class RipgrepSamples(unittest.TestCase):
     @classmethod
