@@ -36,6 +36,8 @@ Set `RECIPKG_TEST_JQ`, `RECIPKG_TEST_RG`, `RECIPKG_TEST_GIT`, `RECIPKG_TEST_FFMP
 
 When a case fails, compare the fixed upstream recipe, version, environment, and stderr before changing expected behavior. Add tests for newly observed cases and retain unresolved differences. The tests live outside Markdown-only recipe archives.
 
+To exercise the actual Canvas recipe's pinned recursive dependencies and tamper detection, set `RECIPKG_TEST_CANVAS_RECIPE` to its checkout and `RECIPKG_TEST_CLI` to the selected Recipkg executable, then run `python3 -m unittest discover -s tests -p test_canvas_package.py -v`. Packing fetches the fixed Git dependencies; the temporary archives are removed afterward. This checks package context and integrity, not a rebuilt Canvas or SDK.
+
 For the OpenClaw Gateway sample, provide `RECIPKG_TEST_OPENCLAW` pointing to a disposable executable. It runs a loopback fake OpenAI-compatible model and a Gateway with temporary configuration, workspace, HOME, state, dummy credentials, channels and mDNS disabled, then checks two turns, history and normal restart. It does not request tool execution and is not a network or OS sandbox; startup can attempt external access. It does not verify a complete release, fixed-source build, sandbox or reconstruction. Without the variable, the test is skipped.
 
 ```sh
