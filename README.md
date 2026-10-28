@@ -49,3 +49,11 @@ To run the real agent-server process sample, set `RECIPKG_TEST_OPENHANDS_SERVER_
 ```sh
 RECIPKG_TEST_OPENHANDS_SERVER_PYTHON=/absolute/path/to/python python3 -m unittest discover -s tests -p test_openhands_server.py -v
 ```
+
+For manual Canvas integration observations, `tools/openhands_canvas_fixture.py` serves an explicitly supplied prebuilt static Canvas, launches the candidate Agent Server, and supplies a loopback OpenAI-compatible model fixture with both streaming and non-streaming replies. Use a Python environment with the candidate server, tools and `aiohttp` installed. The program prints the local Canvas URL, mock model URL, disposable workspace and dummy session key. It disables telemetry in its test configuration; automation service and external resources are not provided. Use a disposable browser and block its non-loopback requests. The fixture is not a security sandbox and must never be used with real credentials or repositories. Stop it with Ctrl-C; it terminates its server and removes its own temporary data.
+
+```sh
+/absolute/path/to/server-python tools/openhands_canvas_fixture.py --build-dir /absolute/path/to/canvas/build
+```
+
+In the browser, create a model profile using the printed model URL and a dummy key, select the printed workspace, send a message, then return to it from the sidebar. Check the actual conversation status and both messages; inspect errors instead of assuming the complete UI passed. The model fixture calls the Agent's `finish` tool and has no intelligence or external side effects. Verify the exact build's provenance separately; this manual sample is not an automated browser test, complete compatibility test, or reconstruction acceptance.
