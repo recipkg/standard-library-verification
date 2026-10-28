@@ -298,12 +298,18 @@ class ValkeySamples(unittest.TestCase):
         replica_directory = self.directory / 'replica'
         replica_directory.mkdir()
         replica_path = replica_directory / 'server.sock'
-        replica_process = subprocess.Popen([
+        replica_args = [
             self.server, '--port', '0', '--unixsocket', str(replica_path), '--unixsocketperm', '700',
             '--daemonize', 'no', '--protected-mode', 'yes', '--save', '', '--appendonly', 'no',
             '--dir', str(replica_directory), '--replicaof', '127.0.0.1', str(primary_port),
             '--loglevel', 'warning',
-        ], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        ]
+
+        def launch_replica():
+            return subprocess.Popen(replica_args, stdin=subprocess.DEVNULL,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        replica_process = launch_replica()
 
         def stop_replica():
             if replica_process.poll() is None:
@@ -314,18 +320,20 @@ class ValkeySamples(unittest.TestCase):
                     replica_process.kill()
                     replica_process.wait(timeout=5)
         self.addCleanup(stop_replica)
-        deadline = time.monotonic() + 15
-        replica = None
-        while time.monotonic() < deadline:
-            if replica_process.poll() is not None:
-                self.fail(f'replica exited during startup: {replica_process.returncode}')
-            try:
-                replica = Client(replica_path)
-                self.clients.append(replica)
-                break
-            except (ConnectionRefusedError, FileNotFoundError):
-                time.sleep(0.02)
-        self.assertIsNotNone(replica, 'replica Unix socket did not become ready')
+        def connect_replica():
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline:
+                if replica_process.poll() is not None:
+                    self.fail(f'replica exited during startup: {replica_process.returncode}')
+                try:
+                    connection = Client(replica_path)
+                    self.clients.append(connection)
+                    return connection
+                except (ConnectionRefusedError, FileNotFoundError):
+                    time.sleep(0.02)
+            self.fail('replica Unix socket did not become ready')
+
+        replica = connect_replica()
 
         def wait_for(command, expected):
             deadline = time.monotonic() + 15
@@ -351,6 +359,28 @@ class ValkeySamples(unittest.TestCase):
         wait_for(('GET', 'live'), b'updated')
         wait_for(('GET', 'before-sync'), NULL_BULK)
         self.assertIs(primary.command('GET', 'forbidden'), NULL_BULK)
+        self.assertEqual(primary.command('SET', 'delete-while-offline', 'old'), b'OK')
+        wait_for(('GET', 'delete-while-offline'), b'old')
+
+        replica.close()
+        self.clients.remove(replica)
+        stop_replica()
+        self.assertEqual(replica_process.returncode, 0, 'replica did not stop normally')
+        self.assertEqual(primary.command('SET', 'live', 'offline-update'), b'OK')
+        self.assertEqual(primary.command('HSET', 'hash', 'field', 'offline-update'), 0)
+        self.assertEqual(primary.command('SET', 'offline-new', 'present'), b'OK')
+        self.assertEqual(primary.command('DEL', 'delete-while-offline'), 1)
+        replica_process = launch_replica()
+        replica = connect_replica()
+        wait_for(('GET', 'live'), b'offline-update')
+        wait_for(('HGET', 'hash', 'field'), b'offline-update')
+        wait_for(('GET', 'offline-new'), b'present')
+        wait_for(('GET', 'delete-while-offline'), NULL_BULK)
+
+        self.assertEqual(replica.command('REPLICAOF', 'NO', 'ONE'), b'OK')
+        self.assertEqual(replica.command('SET', 'live', 'promoted'), b'OK')
+        self.assertEqual(replica.command('GET', 'live'), b'promoted')
+        self.assertEqual(primary.command('GET', 'live'), b'offline-update')
 
 
 if __name__ == '__main__':
