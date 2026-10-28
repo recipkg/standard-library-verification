@@ -198,6 +198,96 @@ class MinifluxSamples(unittest.TestCase):
         self.assertEqual(self.request('DELETE', f'/v1/categories/{cid}')[0], 204)
         self.assertEqual(self.request('DELETE', f'/v1/categories/{cid}')[0], 404)
 
+    def test_entry_import_filters_and_pagination(self):
+        self.assertEqual(self.request('POST', '/v1/users',
+                                      {'username': 'query-fixture', 'password': 'query-password-321',
+                                       'is_admin': False})[0], 201)
+        credentials = {'user': 'query-fixture', 'password': 'query-password-321'}
+        category = self.request('GET', '/v1/categories', **credentials)[1][0]
+        status, feed = self.request('POST', '/v1/feeds',
+                                    {'feed_url': f'http://127.0.0.1:{self.feed.server_port}/query.xml',
+                                     'category_id': category['id']}, **credentials)
+        self.assertEqual(status, 201)
+        feed_id = feed['feed_id']
+        endpoint = f'/v1/feeds/{feed_id}/entries/import'
+        status, first = self.request('POST', endpoint,
+                                     {'url': 'https://example.invalid/one', 'title': 'Alpha',
+                                      'external_id': 'first', 'published_at': 1700000000,
+                                      'status': 'unread', 'starred': True,
+                                      'content': '<p>Hello</p><script>alert(1)</script>'}, **credentials)
+        self.assertEqual(status, 201)
+        status, second = self.request('POST', endpoint,
+                                      {'url': 'https://example.invalid/two', 'title': 'Beta',
+                                       'external_id': 'second', 'published_at': 1700000001}, **credentials)
+        self.assertEqual(status, 201)
+        status, entry = self.request('GET', f'/v1/entries/{first["id"]}', **credentials)
+        self.assertEqual((status, entry['status'], entry['starred']), (200, 'unread', True))
+        self.assertNotIn('<script', entry['content'].lower())
+        status, duplicate = self.request('POST', endpoint,
+                                        {'url': 'https://example.invalid/one', 'title': 'New',
+                                         'external_id': 'first', 'status': 'read'}, **credentials)
+        self.assertEqual((status, duplicate['id']), (200, first['id']))
+        entry = self.request('GET', f'/v1/entries/{first["id"]}', **credentials)[1]
+        self.assertEqual((entry['title'], entry['status'], entry['starred']), ('Alpha', 'read', True))
+        all_entries = self.request('GET', '/v1/entries', **credentials)[1]['entries']
+        self.assertEqual(len(all_entries), 3)
+        all_ids = {entry['id'] for entry in all_entries}
+        for query, total, ids in [
+            ('status=read', 2, {first['id'], second['id']}),
+            ('starred=true', 1, {first['id']}),
+            ('search=Alpha', 1, {first['id']}),
+            ('order=id&direction=asc&limit=1&offset=1', 3, {first['id']}),
+            ('starred=bogus', 3, all_ids),
+        ]:
+            status, result = self.request('GET', '/v1/entries?' + query, **credentials)
+            self.assertEqual(status, 200)
+            self.assertEqual((result['total'], {entry['id'] for entry in result['entries']}), (total, ids))
+        for query in ('status=bogus', 'order=bogus', 'direction=bogus', 'feed_id=999999', 'limit=1001'):
+            self.assertEqual(self.request('GET', '/v1/entries?' + query, **credentials)[0], 400)
+        self.assertEqual(self.request('GET', '/v1/entries?limit=-1', **credentials)[1]['total'], 3)
+        status, ids = self.request('GET', '/v1/entries/ids?starred=true', **credentials)
+        self.assertEqual((status, ids['total'], ids['entry_ids']), (200, 1, [first['id']]))
+        for query in ('starred=bogus', 'status=bogus'):
+            self.assertEqual(self.request('GET', '/v1/entries/ids?' + query, **credentials)[0], 400)
+
+    def test_api_roles_and_authentication_precedence(self):
+        admin = self.request('GET', '/v1/me')[1]
+        status, user = self.request('POST', '/v1/users',
+                                    {'username': 'role-fixture', 'password': 'role-password-321',
+                                     'is_admin': False})
+        self.assertEqual(status, 201)
+        credentials = {'user': 'role-fixture', 'password': 'role-password-321'}
+        self.assertEqual(self.request('GET', '/v1/users', **credentials)[0], 403)
+        self.assertEqual(self.request('GET', f'/v1/users/{user["id"]}', **credentials)[0], 403)
+        self.assertEqual(self.request('POST', '/v1/users',
+                                      {'username': 'should-not-exist', 'password': 'fixture-password'},
+                                      **credentials)[0], 403)
+        status, updated = self.request('PUT', f'/v1/users/{user["id"]}',
+                                       {'language': 'en_US'}, **credentials)
+        self.assertEqual((status, updated['id'], updated['is_admin']), (201, user['id'], False))
+        self.assertEqual(self.request('PUT', f'/v1/users/{user["id"]}',
+                                      {'is_admin': True}, **credentials)[0], 400)
+        self.assertEqual(self.request('PUT', f'/v1/users/{admin["id"]}',
+                                      {'language': 'en_US'}, **credentials)[0], 403)
+        self.assertEqual(self.request('DELETE', f'/v1/users/{user["id"]}', **credentials)[0], 403)
+        self.assertEqual(self.request('DELETE', f'/v1/users/{admin["id"]}')[0], 400)
+        self.assertEqual(self.request('PUT', f'/v1/users/{admin["id"]}/mark-all-as-read',
+                                      **credentials)[0], 403)
+        self.assertEqual(self.request('PUT', f'/v1/users/{user["id"]}/mark-all-as-read')[0], 403)
+        self.assertEqual(self.request('PUT', f'/v1/users/{user["id"]}/mark-all-as-read',
+                                      **credentials)[0], 204)
+
+        status, key = self.request('POST', '/v1/api-keys', {'description': 'role-fixture key'})
+        self.assertEqual(status, 201)
+        self.assertEqual(self.request('GET', '/v1/me', token='invalid-fixture-token')[0], 401)
+        status, authenticated = self.request('GET', '/v1/me', user='role-fixture',
+                                              password='wrong', token=key['token'])
+        self.assertEqual((status, authenticated['id']), (200, admin['id']))
+        self.assertEqual(self.request('DELETE', f'/v1/api-keys/{key["id"]}', **credentials)[0], 404)
+        self.assertEqual(self.request('GET', '/v1/me', user=None, token=key['token'])[0], 200)
+        self.assertEqual(self.request('DELETE', f'/v1/api-keys/{key["id"]}')[0], 204)
+        self.assertEqual(self.request('GET', '/v1/me', user=None, token=key['token'])[0], 401)
+
     @unittest.skipUnless(os.environ.get('RECIPKG_PLAYWRIGHT_CLI'),
                          'set RECIPKG_PLAYWRIGHT_CLI to run the optional real-browser sample')
     def test_browser_login_read_star_and_mobile_navigation(self):
