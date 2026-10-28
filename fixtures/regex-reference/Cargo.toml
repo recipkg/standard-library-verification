@@ -1,0 +1,9 @@
+[package]
+name = "recipkg-regex-probe"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+regex = "=1.13.0"
+regex-automata = "=0.4.15"
+regex-syntax = "=0.8.11"

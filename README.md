@@ -8,11 +8,23 @@
 
 Small, reproducible black-box comparisons for selected contracts in the [Recipkg standard library](https://github.com/recipkg/standard-library). The tests run candidate executables on disposable input and assert user-visible results. They do **not** establish full compatibility, source provenance, secure isolation, or independent reconstruction.
 
-These tests currently correspond to selected observations in `recipkg/jq` v0.1.3 (upstream jq 1.8.2), `recipkg/ripgrep` v0.1.3 (upstream ripgrep 15.2.0), `recipkg/ffmpeg` v0.1.5 (upstream FFmpeg 9.0.2), `recipkg/miniflux` v0.1.6 (upstream source commit `3945f3daa0a90040f761d79a5f62a678fe86ba4e`), `recipkg/syncthing` v0.1.2 (upstream source commit `ed38528d7fba3dd6a42c9c9fc6780af432dc15d2`), and `recipkg/openhands-agent-sdk` v0.1.6 (upstream source commit `46b1fa5cb91ada17e6ec938c7e8624a4fa19fa98`); upstream builds may differ in codecs or features. Git is required for ripgrep's repository filtering test; FFmpeg needs lavfi, Matroska, WAV, PCM, volume, amix and asplit support. jq/ripgrep/FFmpeg/ffprobe are not bundled dependencies.
+These tests currently correspond to selected observations in `recipkg/jq` v0.1.3 (upstream jq 1.8.2), `recipkg/ripgrep` v0.1.4 (upstream ripgrep 15.2.0), `recipkg/ffmpeg` v0.1.5 (upstream FFmpeg 9.0.2), `recipkg/miniflux` v0.1.6 (upstream source commit `3945f3daa0a90040f761d79a5f62a678fe86ba4e`), `recipkg/syncthing` v0.1.2 (upstream source commit `ed38528d7fba3dd6a42c9c9fc6780af432dc15d2`), and `recipkg/openhands-agent-sdk` v0.1.6 (upstream source commit `46b1fa5cb91ada17e6ec938c7e8624a4fa19fa98`); upstream builds may differ in codecs or features. Git is required for ripgrep's repository filtering test; FFmpeg needs lavfi, Matroska, WAV, PCM, volume, amix and asplit support. jq/ripgrep/FFmpeg/ffprobe are not bundled dependencies.
 
 The Vikunja API sample corresponds to `recipkg/vikunja` v0.1.2 and upstream commit `e37ebc0d10db366ff111bc4bb74a696d7cfc912e`.
 
 The OpenClaw Gateway sample was observed with npm `openclaw@2026.10.8` (`dc2523e`), a different commit from the current `recipkg/openclaw` recipe. See that recipe's `GATEWAY-RELEASE-OBSERVED.md` for its provenance and limitations.
+
+The optional regex samples correspond to `recipkg/regex` v0.1.0 and the upstream `regex` 1.13.0 crate. Set `RECIPKG_TEST_REGEX_ADAPTER` to an adapter for the engine being tested. It accepts `PATTERN TEXT` as arguments and emits `{"matches":[[start,end],...]}` using UTF-8 byte offsets (exit 0), or `{"error":"compile"}` for invalid patterns (exit 2); `--version` identifies the adapter. This adapter protocol is only for testing and does not prescribe the engine's implementation language or product API. An absent variable skips the class; an explicitly invalid target fails.
+
+For comparison with the upstream crate, build the included reference adapter with Rust and Cargo, using a disposable output directory:
+
+```sh
+regex_target="$(mktemp -d)"
+CARGO_TARGET_DIR="$regex_target" cargo build --locked --manifest-path fixtures/regex-reference/Cargo.toml
+RECIPKG_TEST_REGEX_ADAPTER="$regex_target/debug/recipkg-regex-probe" python3 -m unittest discover -s tests -p test_regex.py -v
+```
+
+The reference calls the upstream package; its passing results do not demonstrate a reconstructed engine. Remove the disposable target directory after use. Cargo may download packages to its configured cache.
 
 Run locally with Python 3.11+:
 
