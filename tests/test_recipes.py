@@ -112,6 +112,9 @@ class JqSamples(unittest.TestCase):
             ('[{},true,[],0,false,"a",null] | sort', None, [[None, False, True, 0, 'a', [], {}]]),
             ('[[1,2] < [1,3], {"a":1} < {"b":0}, 1 < "0"]', None, [[True, True, True]]),
             ('[(1,2) < (2,3)]', None, [[True, False, True, True]]),
+            ('[1==1.0, [true]==[1], {"a":true}=={"a":1}]', None, [[True, False, False]]),
+            ('if false then 1 elif true then 2 end', None, [2]),
+            ('[false and (1,2), true or empty]', None, [[False, True]]),
         ]
         for expression, source, expected in cases:
             with self.subTest(expression=expression):
