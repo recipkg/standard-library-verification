@@ -164,6 +164,35 @@ class JqSamples(unittest.TestCase):
         result = self.invoke(['-c', '(. as $x | .+1) | $x'], '5')
         self.assertEqual((result.returncode, result.stdout), (3, ''))
         self.assertTrue(result.stderr)
+
+    def test_binding_and_reduction_boundaries(self):
+        cases = [
+            ('[.[] as [$a,$b] | [$a,$b]]', [[1], [], [3, 4, 5]], [[[1, None], [None, None], [3, 4]]]),
+            ('[.[] as [$a,$b] | [$a,$b]]', [None], [[[None, None]]]),
+            ('[(1,2) as $x | ($x,.),$x]', 10, [[1, 10, 1, 2, 10, 2]]),
+            ('reduce .[] as $x (0; (.,.+$x))', [1, 2, 3], [6]),
+            ('foreach .[] as $x (0; (.,.+$x))', [1, 2, 3], [0, 1, 1, 3, 3, 6]),
+            ('foreach .[] as $x (0; empty)', [1, 2, 3], []),
+            ('reduce (1,2) as $x ((0,10); .+$x)', None, [3, 13]),
+            ('reduce (.[]? // 9) as $x ((0,10); .+$x)', [1, 2], [3, 19]),
+            ('foreach .[] as $x ((0,10); .+$x)', [1, 2], [1, 3, 11, 13]),
+            ('foreach .[] as $x (0; .+$x; (., .+10))', [1, 2], [1, 11, 3, 13]),
+        ]
+        for expression, source, expected in cases:
+            with self.subTest(expression=expression, source=source):
+                result = self.invoke(['-c', expression], json.dumps(source))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                actual = [json.loads(line) for line in result.stdout.splitlines()]
+                self.assertEqual(json.dumps(actual, sort_keys=True), json.dumps(expected, sort_keys=True))
+                self.assertEqual(result.stderr, '')
+        invalid = self.invoke(['-c', '[.[] as [$a,$b] | [$a,$b]]'], '[5]')
+        self.assertEqual((invalid.returncode, invalid.stdout), (5, ''))
+        self.assertTrue(invalid.stderr)
+        for expression in ('$missing', '(. as $x | .+1) | $x'):
+            with self.subTest(expression=expression):
+                result = self.invoke(['-c', expression], '')
+                self.assertEqual((result.returncode, result.stdout), (3, ''))
+                self.assertTrue(result.stderr)
         result = self.invoke(['-c', 'reduce .[] as $x ((0,10); .+$x)'], '[1,2]')
         self.assertEqual((result.returncode, result.stdout), (5, '3\n'))
         self.assertTrue(result.stderr)

@@ -8,6 +8,37 @@ import unittest
 
 
 class JqDifferential(unittest.TestCase):
+    def test_binding_and_reduction_streams(self):
+        target = os.environ.get('RECIPKG_TEST_JQ')
+        reference = os.environ.get('RECIPKG_TEST_JQ_REFERENCE')
+        if not target and not reference:
+            self.skipTest('set RECIPKG_TEST_JQ and RECIPKG_TEST_JQ_REFERENCE')
+        if not target or not reference:
+            self.fail('both target and reference must be specified')
+        target, reference = shutil.which(target), shutil.which(reference)
+        self.assertIsNotNone(target, 'jq target not found')
+        self.assertIsNotNone(reference, 'jq reference not found')
+        self.assertNotEqual(os.path.realpath(target), os.path.realpath(reference))
+        rng = random.Random(9341)
+        expressions = [
+            '[.[] as $x | [$x,.]]',
+            'reduce .[] as $x (0; .+$x)',
+            'foreach .[] as $x (0; .+$x; [$x,.])',
+            'foreach .[] as $x (0; (.,.+$x))',
+        ]
+        for _ in range(25):
+            source = [rng.randint(-9, 9) for _ in range(rng.randrange(7))]
+            for expression in expressions:
+                with self.subTest(expression=expression, source=source):
+                    results = []
+                    for exe in (reference, target):
+                        run = subprocess.run([exe, '-c', expression], input=json.dumps(source),
+                                             text=True, capture_output=True, timeout=10)
+                        self.assertEqual(run.returncode, 0, run.stderr)
+                        self.assertEqual(run.stderr, '')
+                        results.append([json.loads(line) for line in run.stdout.splitlines()])
+                    self.assertEqual(results[0], results[1])
+
     def test_conditions_and_json_ordering(self):
         target = os.environ.get('RECIPKG_TEST_JQ')
         reference = os.environ.get('RECIPKG_TEST_JQ_REFERENCE')
