@@ -250,6 +250,53 @@ class JqSamples(unittest.TestCase):
         self.assertTrue(records[1][0])
         self.assertEqual(result.stderr, '')
 
+    def test_stream_structure_and_input_modes(self):
+        cases = [
+            ('null', [[[], None]]), ('42', [[[], 42]]), ('[]', [[[], []]]),
+            ('{}', [[[], {}]]), ('[1,2]', [[[0], 1], [[1], 2], [[1]]]),
+            ('[[],{}]', [[[0], []], [[1], {}], [[1]]]),
+            ('[[1,2],3]', [[[0, 0], 1], [[0, 1], 2], [[0, 1]], [[1], 3], [[1]]]),
+            ('{"a":{"b":1},"c":[true,null]}',
+             [[['a', 'b'], 1], [['a', 'b']], [['c', 0], True],
+              [['c', 1], None], [['c', 1]], [['c']]]),
+            ('1 2', [[[], 1], [[], 2]]),
+        ]
+        for source, expected in cases:
+            with self.subTest(source=source):
+                for option in ('--stream', '--stream-errors'):
+                    result = self.invoke(['-c', option, '.'], source)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual([json.loads(line) for line in result.stdout.splitlines()], expected)
+                    self.assertEqual(result.stderr, '')
+        for args, expected in [(['-cs', '--stream', '.'], '[[[0],1],[[1],2],[[1]]]\n'),
+                               (['-cn', '--stream', '[inputs]'], '[[[0],1],[[1],2],[[1]]]\n'),
+                               (['-cR', '--stream', '.'], '"[1,2]"\n')]:
+            with self.subTest(args=args):
+                result = self.invoke(args, '[1,2]')
+                self.assertEqual((result.returncode, result.stdout, result.stderr), (0, expected, ''))
+        with tempfile.TemporaryDirectory(prefix='jq-stream-sample-') as directory:
+            root = Path(directory)
+            for name, data in [('empty', ''), ('first', '["one",['), ('second', '2]]')]:
+                (root / name).write_text(data, encoding='utf-8')
+            result = command([self.jq, '-c', '--stream', '.', 'empty', 'first', 'second'],
+                             cwd=root, input='')
+            self.assertEqual((result.returncode, result.stdout, result.stderr),
+                             (0, '[[0],"one"]\n[[1,0],2]\n[[1,0]]\n[[1]]\n', ''))
+        for source, previous, path in [('[1,]', [[[0], 1]], [1]),
+                                      ('[1,2', [[[0], 1]], [1]),
+                                      ('{"a":1,}', [[['a'], 1]], [None])]:
+            with self.subTest(source=source):
+                result = self.invoke(['-c', '--stream-errors', '.'], source)
+                self.assertEqual((result.returncode, result.stderr), (0, ''))
+                records = [json.loads(line) for line in result.stdout.splitlines()]
+                self.assertEqual(records[:-1], previous)
+                self.assertTrue(records[-1][0])
+                self.assertEqual(records[-1][1], path)
+                result = self.invoke(['-c', '--stream', '.'], source)
+                self.assertEqual(result.returncode, 5)
+                self.assertEqual([json.loads(line) for line in result.stdout.splitlines()], previous)
+                self.assertTrue(result.stderr)
+
     def test_raw_inputs_and_nul_output(self):
         for args, expected in [(['-Rc', '.'], '"hello"\n""\n"world"\n'),
                                (['-Rsc', '.'], '"hello\\n\\nworld"\n')]:
