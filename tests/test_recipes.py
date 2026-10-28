@@ -567,6 +567,57 @@ class FFmpegSamples(unittest.TestCase):
         self.assertEqual(self.wav_samples('track0.wav'), (0,) * 1000)
         self.assertEqual(self.wav_samples('track1.wav'), self.wav_samples('source.wav'))
 
+    def make_rgb_frames(self):
+        frames = [bytes(value for y in range(4) for x in range(4)
+                        for value in (frame * 40, x * 50, y * 50))
+                  for frame in range(4)]
+        (self.root / 'source.rgb').write_bytes(b''.join(frames))
+        return frames
+
+    def raw_video_input(self):
+        return ('-f', 'rawvideo', '-pixel_format', 'rgb24', '-video_size', '4x4',
+                '-framerate', '4', '-i', 'source.rgb')
+
+    def test_video_crop_and_nearest_scale_pixels(self):
+        self.make_rgb_frames()
+        self.ff(*self.raw_video_input(), '-vf', 'crop=2:2:1:1,scale=4:4:flags=neighbor',
+                '-fps_mode', 'passthrough', '-c:v', 'rawvideo', '-pix_fmt', 'rgb24',
+                '-f', 'rawvideo', 'cropped.rgb')
+        expected = bytes(value for frame in range(4) for y in range(4) for x in range(4)
+                         for value in (frame * 40, (1 + x // 2) * 50, (1 + y // 2) * 50))
+        self.assertEqual((self.root / 'cropped.rgb').read_bytes(), expected)
+        for index, crop in enumerate(('crop=5:5:0:0', 'crop=0:2:0:0')):
+            with self.subTest(crop=crop):
+                result = self.ff(*self.raw_video_input(), '-vf', crop, '-c:v', 'rawvideo',
+                                 '-pix_fmt', 'rgb24', '-f', 'rawvideo', f'invalid-{index}.rgb', check=False)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertTrue(result.stderr)
+
+    def test_video_fps_frame_selection(self):
+        frames = self.make_rgb_frames()
+        for rate, indices in [(8, [0, 0, 1, 1, 2, 2, 3, 3]), (2, [0, 2])]:
+            with self.subTest(rate=rate):
+                name = f'fps-{rate}.rgb'
+                self.ff(*self.raw_video_input(), '-vf', f'fps={rate}', '-fps_mode', 'passthrough',
+                        '-c:v', 'rawvideo', '-pix_fmt', 'rgb24', '-f', 'rawvideo', name)
+                self.assertEqual((self.root / name).read_bytes(), b''.join(frames[i] for i in indices))
+
+    def test_video_transcode_frame_data_and_timestamps(self):
+        frames = self.make_rgb_frames()
+        self.ff(*self.raw_video_input(), '-vf', 'fps=2', '-fps_mode', 'passthrough',
+                '-c:v', 'ffv1', 'out.mkv')
+        probe = command([self.ffprobe, '-v', 'error', '-select_streams', 'v:0',
+                         '-show_entries', 'stream=codec_name,width,height:frame=best_effort_timestamp_time',
+                         '-show_frames', '-of', 'json', 'out.mkv'], cwd=self.root)
+        self.assertEqual(probe.returncode, 0, probe.stderr)
+        data = json.loads(probe.stdout)
+        self.assertEqual([(s['codec_name'], s['width'], s['height']) for s in data['streams']],
+                         [('ffv1', 4, 4)])
+        self.assertEqual([float(f['best_effort_timestamp_time']) for f in data['frames']], [0.0, 0.5])
+        self.ff('-i', 'out.mkv', '-fps_mode', 'passthrough', '-c:v', 'rawvideo',
+                '-pix_fmt', 'rgb24', '-f', 'rawvideo', 'decoded.rgb')
+        self.assertEqual((self.root / 'decoded.rgb').read_bytes(), frames[0] + frames[2])
+
 
 if __name__ == '__main__':
     unittest.main()
