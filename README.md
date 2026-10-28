@@ -2,7 +2,7 @@
 
 Small, reproducible black-box comparisons for selected contracts in the [Recipkg standard library](https://github.com/recipkg/standard-library). The tests run candidate executables on disposable input and assert user-visible results. They do **not** establish full compatibility, source provenance, secure isolation, or independent reconstruction.
 
-These tests currently correspond to selected observations in `recipkg/jq` v0.1.0 (upstream jq 1.8.2), `recipkg/ripgrep` v0.1.0 (upstream ripgrep 15.2.0), `recipkg/ffmpeg` v0.1.3 (upstream FFmpeg 9.0.2), `recipkg/miniflux` v0.1.3 (upstream source commit `3945f3daa0a90040f761d79a5f62a678fe86ba4e`), and `recipkg/syncthing` v0.1.1 (upstream source commit `ed38528d7fba3dd6a42c9c9fc6780af432dc15d2`); upstream builds may differ in codecs or features. Git is required for ripgrep's repository filtering test; FFmpeg needs lavfi, Matroska and PCM support. jq/ripgrep/FFmpeg/ffprobe are not bundled dependencies.
+These tests currently correspond to selected observations in `recipkg/jq` v0.1.0 (upstream jq 1.8.2), `recipkg/ripgrep` v0.1.0 (upstream ripgrep 15.2.0), `recipkg/ffmpeg` v0.1.3 (upstream FFmpeg 9.0.2), `recipkg/miniflux` v0.1.4 (upstream source commit `3945f3daa0a90040f761d79a5f62a678fe86ba4e`), and `recipkg/syncthing` v0.1.1 (upstream source commit `ed38528d7fba3dd6a42c9c9fc6780af432dc15d2`); upstream builds may differ in codecs or features. Git is required for ripgrep's repository filtering test; FFmpeg needs lavfi, Matroska and PCM support. jq/ripgrep/FFmpeg/ffprobe are not bundled dependencies.
 
 Run locally with Python 3.11+:
 
@@ -18,6 +18,12 @@ Miniflux samples require an explicitly supplied `RECIPKG_TEST_MINIFLUX` binary p
 
 ```sh
 RECIPKG_TEST_MINIFLUX=/absolute/path/to/miniflux python3 -m unittest discover -s tests -p test_miniflux.py -v
+```
+
+For the optional real-browser sample, install Playwright CLI and its Chromium browser separately, and set `RECIPKG_PLAYWRIGHT_CLI` to the executable (or a CLI wrapper `.sh`). It runs a uniquely named headless browser session and closes it afterward. It verifies a small login, read, star, feed-add and mobile-menu sequence; it is not complete UI or accessibility acceptance. Without this variable, the browser case is explicitly skipped.
+
+```sh
+RECIPKG_TEST_MINIFLUX=/absolute/path/to/miniflux RECIPKG_PLAYWRIGHT_CLI=/absolute/path/to/playwright-cli python3 -m unittest discover -s tests -p test_miniflux.py -v
 ```
 
 Syncthing samples require an explicitly supplied `RECIPKG_TEST_SYNCTHING` binary. They create separate temporary configuration and data directories, keys, and shared folders for two loopback-only processes. Discovery, relays, NAT, reporting, automatic upgrades and browser launching are disabled in test configuration. The test stops both processes and removes the temporary directory only after shutdown; if process termination cannot be confirmed it preserves the data. It never reads an existing Syncthing configuration or connects to the user's devices. Without the variable, this class is skipped.

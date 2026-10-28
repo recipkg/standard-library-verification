@@ -4,6 +4,7 @@ import http.server
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import socket
 import subprocess
@@ -11,6 +12,7 @@ import tempfile
 import threading
 import time
 import unittest
+import uuid
 import xml.etree.ElementTree as ET
 import urllib.error
 import urllib.request
@@ -195,6 +197,89 @@ class MinifluxSamples(unittest.TestCase):
                                       user='fixture-user', password='fixture-user-password-321')[0], 404)
         self.assertEqual(self.request('DELETE', f'/v1/categories/{cid}')[0], 204)
         self.assertEqual(self.request('DELETE', f'/v1/categories/{cid}')[0], 404)
+
+    @unittest.skipUnless(os.environ.get('RECIPKG_PLAYWRIGHT_CLI'),
+                         'set RECIPKG_PLAYWRIGHT_CLI to run the optional real-browser sample')
+    def test_browser_login_read_star_and_mobile_navigation(self):
+        cli = Path(os.environ['RECIPKG_PLAYWRIGHT_CLI']).expanduser().resolve(strict=True)
+        prefix = (['bash', str(cli)] if cli.suffix == '.sh' else [str(cli)])
+        session = 'recipkg-miniflux-' + uuid.uuid4().hex
+
+        def run(*args):
+            command = prefix + ['-s=' + session, *args]
+            result = subprocess.run(command, cwd=self.root, capture_output=True, text=True, timeout=60)
+            if result.returncode:
+                self.fail(f'browser command {args[0]} failed: {result.stdout[-2000:]} {result.stderr[-500:]}')
+            return result.stdout
+
+        def snapshot():
+            return run('snapshot')
+
+        def ref(state, role, name):
+            match = re.search(r'\b' + re.escape(role) + r' "' + re.escape(name)
+                              + r'"[^\n]*\[ref=([^\]]+)\]', state)
+            self.assertIsNotNone(match, f'{role} {name!r} missing from snapshot:\n{state}')
+            return match.group(1)
+
+        self.addCleanup(lambda: run('close'))
+        status, category = self.request('POST', '/v1/categories', {'title': 'Browser fixture'})
+        self.assertEqual(status, 201)
+        feed_url = f'http://127.0.0.1:{self.feed.server_port}/browser.xml'
+        status, feed = self.request('POST', '/v1/feeds',
+                                    {'feed_url': feed_url, 'category_id': category['id']})
+        self.assertEqual(status, 201)
+        feed_id = feed['feed_id']
+        entries = self.request('GET', f'/v1/feeds/{feed_id}/entries')[1]['entries']
+        self.assertEqual(len(entries), 1)
+        entry_id = entries[0]['id']
+        run('open', self.base + '/')
+        state = snapshot()
+        run('fill', ref(state, 'textbox', 'Username'), 'fixture-admin')
+        run('fill', ref(state, 'textbox', 'Password'), 'wrong-fixture-password')
+        run('click', ref(state, 'button', 'Login'))
+        state = snapshot()
+        self.assertIn('Invalid username or password.', state)
+        run('fill', ref(state, 'textbox', 'Password'), 'fixture-password-321')
+        run('click', ref(state, 'button', 'Login'))
+        state = snapshot()
+        self.assertIn('Fixture entry', state)
+        self.assertIn('Browser fixture', state)
+        run('click', ref(state, 'button', 'Star'))
+        state = snapshot()
+        self.assertIsNotNone(ref(state, 'button', 'Unstar'))
+        run('click', ref(state, 'link', 'Fixture entry'))
+        state = snapshot()
+        self.assertIn('Entry body', state)
+        self.assertIsNotNone(ref(state, 'button', 'Mark as unread'))
+        entry = self.request('GET', f'/v1/entries/{entry_id}')[1]
+        self.assertEqual((entry['status'], entry['starred']), ('read', True))
+        run('click', ref(state, 'link', 'Unread'))
+        state = snapshot()
+        self.assertIn('There are no unread entries.', state)
+        run('click', ref(state, 'link', 'Starred'))
+        state = snapshot()
+        self.assertIn('Fixture entry', state)
+        run('click', ref(state, 'link', 'Feeds'))
+        state = snapshot()
+        run('click', ref(state, 'link', 'Add feed'))
+        state = snapshot()
+        run('fill', ref(state, 'textbox', 'URL'),
+            f'http://127.0.0.1:{self.feed.server_port}/browser-second.xml')
+        run('select', ref(state, 'combobox', 'Category'), str(category['id']))
+        run('click', ref(state, 'button', 'Find a feed'))
+        state = snapshot()
+        self.assertIn('Fixture Feed', state)
+        self.assertIn('Fixture entry', state)
+        feeds = self.request('GET', '/v1/feeds')[1]
+        added = [item for item in feeds if item['feed_url'].endswith('/browser-second.xml')]
+        self.assertEqual(len(added), 1)
+        self.assertEqual(added[0]['category']['id'], category['id'])
+        run('resize', '375', '812')
+        state = snapshot()
+        run('click', ref(state, 'button', 'Menu'))
+        state = snapshot()
+        self.assertRegex(state, r'button "Menu" \[expanded\]')
+        self.assertIsNotNone(ref(state, 'link', 'Feeds'))
 
     def test_opml_import_export_and_partial_failure(self):
         username, password = 'fixture-opml', 'fixture-opml-password-321'
