@@ -55,6 +55,35 @@ class JqSamples(unittest.TestCase):
         self.assertTrue(result.stderr)
         self.assertEqual(result.stdout, '')
 
+    def test_assignment_streams_paths_and_precedence(self):
+        cases = [
+            ('.a = .b', {'a': {'b': 10}, 'b': 20}, [{'a': 20, 'b': 20}]),
+            ('.a |= .b', {'a': {'b': 10}, 'b': 20}, [{'a': 10, 'b': 20}]),
+            ('.a = (1,2)', {'a': 0}, [{'a': 1}, {'a': 2}]),
+            ('.a |= (1,2)', {'a': 0}, [{'a': 1}]),
+            ('.a |= empty', {'a': 1, 'b': 2}, [{'b': 2}]),
+            ('.a = empty', {'a': 1, 'b': 2}, []),
+            ('.items[] |= .+1', {'items': [1, 2, 3]}, [{'items': [2, 3, 4]}]),
+            ('(.a,.b)=0', {'a': 1, 'b': 2}, [{'a': 0, 'b': 0}]),
+            ('.a,.b=0', {'a': 1, 'b': 2}, [1, {'a': 1, 'b': 0}]),
+        ]
+        for expression, source, expected in cases:
+            with self.subTest(expression=expression):
+                result = self.invoke(['-c', expression], json.dumps(source))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual([json.loads(line) for line in result.stdout.splitlines()], expected)
+                self.assertEqual(result.stderr, '')
+
+    def test_optional_and_catch(self):
+        cases = [('[.[]|.a?]', [{}, True, {'a': 1}], [None, 1]),
+                 ('[.[]|try tonumber catch "bad"]', ['1', 'invalid', '3', 4], [1, 'bad', 3, 4])]
+        for expression, source, expected in cases:
+            with self.subTest(expression=expression):
+                result = self.invoke(['-c', expression], json.dumps(source))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout), expected)
+                self.assertEqual(result.stderr, '')
+
 
 class RipgrepSamples(unittest.TestCase):
     @classmethod
