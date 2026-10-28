@@ -1,0 +1,15 @@
+# Recipkg standard-library black-box samples
+
+Small, reproducible black-box comparisons for selected contracts in the [Recipkg standard library](https://github.com/recipkg/standard-library). The tests run candidate executables on disposable input and assert user-visible results. They do **not** establish full compatibility, source provenance, secure isolation, or independent reconstruction.
+
+These tests currently correspond to selected observations in `recipkg/jq` v0.1.0 (upstream jq 1.8.2), `recipkg/ripgrep` v0.1.0 (upstream ripgrep 15.2.0) and `recipkg/ffmpeg` v0.1.3 (upstream FFmpeg 9.0.2); upstream builds may differ in codecs or features. Git is required for ripgrep's repository filtering test; FFmpeg needs lavfi, Matroska and PCM support. jq/ripgrep/FFmpeg/ffprobe are not bundled dependencies.
+
+Run locally with Python 3.11+:
+
+```sh
+python3 -m unittest discover -s tests -v
+```
+
+Set `RECIPKG_TEST_JQ`, `RECIPKG_TEST_RG`, `RECIPKG_TEST_GIT`, `RECIPKG_TEST_FFMPEG`, and `RECIPKG_TEST_FFPROBE` to executable paths to compare a reconstruction. Unavailable executables skip their test class and are reported as skipped: a skipped class is not a pass. The harness prints target version output; record executable provenance, build configuration and platform separately. Temporary fixtures are deleted after each test. It does not connect to a model or use the user's repositories.
+
+When a case fails, compare the fixed upstream recipe, version, environment, and stderr before changing expected behavior. Add tests for newly observed cases and retain unresolved differences. The tests live outside Markdown-only recipe archives.
