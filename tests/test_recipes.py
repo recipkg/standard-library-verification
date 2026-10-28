@@ -147,8 +147,12 @@ class RipgrepSamples(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         self.env = os.environ.copy()
+        for name in ('GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR',
+                     'GIT_CONFIG_COUNT', 'GIT_CEILING_DIRECTORIES'):
+            self.env.pop(name, None)
         self.env.update(RIPGREP_CONFIG_PATH=os.devnull, GIT_CONFIG_GLOBAL=os.devnull,
-                        GIT_CONFIG_SYSTEM=os.devnull, LC_ALL='C')
+                        GIT_CONFIG_SYSTEM=os.devnull, LC_ALL='C', HOME=str(self.root),
+                        XDG_CONFIG_HOME=str(self.root / '.config'))
         result = command([self.git, 'init', '-q'], cwd=self.root, env=self.env)
         self.assertEqual(result.returncode, 0, result.stderr)
         (self.root / '.gitignore').write_text('ignored.txt\n', encoding='utf-8')
@@ -186,6 +190,71 @@ class RipgrepSamples(unittest.TestCase):
         invalid = self.invoke('(', 'normal.txt')
         self.assertEqual(invalid.returncode, 2)
         self.assertTrue(invalid.stderr)
+
+    def make_scope(self):
+        scope = self.root / 'scope'
+        scope.mkdir()
+        paths = ['plain.txt', 'x.log', 'keep.log', 'ignored-by-ignore.txt', 'rg-only.txt',
+                 '.hidden.txt', 'nested/parent-ignored.txt', 'nested/other.log']
+        for name in paths:
+            path = scope / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('needle\n', encoding='utf-8')
+        (scope / '.gitignore').write_text('*.log\nparent-ignored.txt\n', encoding='utf-8')
+        (scope / '.ignore').write_text('!keep.log\nignored-by-ignore.txt\n', encoding='utf-8')
+        (scope / '.rgignore').write_text('!ignored-by-ignore.txt\nrg-only.txt\n', encoding='utf-8')
+        (scope / 'nested/.ignore').write_text('!parent-ignored.txt\n', encoding='utf-8')
+        (scope / 'binary.dat').write_bytes(b'needle\x00binary\n')
+
+    def scope_result(self, *flags):
+        result = self.invoke('-l', *flags, 'needle', 'scope')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return set(result.stdout.splitlines())
+
+    def test_ignore_precedence_and_unrestricted_levels(self):
+        self.make_scope()
+        visible = {'scope/ignored-by-ignore.txt', 'scope/keep.log',
+                   'scope/nested/parent-ignored.txt', 'scope/plain.txt'}
+        self.assertEqual(self.scope_result(), visible)
+        ignored = {'scope/nested/other.log', 'scope/rg-only.txt', 'scope/x.log'}
+        self.assertEqual(self.scope_result('-u'), visible | ignored)
+        self.assertEqual(self.scope_result('-uu'), visible | ignored | {'scope/.hidden.txt'})
+        self.assertEqual(self.scope_result('-uuu'), visible | ignored | {'scope/.hidden.txt', 'scope/binary.dat'})
+        self.assertEqual(self.scope_result('--no-ignore-dot'),
+                         {'scope/ignored-by-ignore.txt', 'scope/plain.txt', 'scope/rg-only.txt'})
+        self.assertEqual(self.scope_result('--no-ignore-vcs'),
+                         visible | {'scope/nested/other.log', 'scope/x.log'})
+
+    def test_glob_override_order_and_explicit_paths(self):
+        self.make_scope()
+        self.assertEqual(self.scope_result('-g', '*.log'),
+                         {'scope/keep.log', 'scope/nested/other.log', 'scope/x.log'})
+        selected = {'scope/.hidden.txt', 'scope/ignored-by-ignore.txt',
+                    'scope/nested/parent-ignored.txt', 'scope/rg-only.txt'}
+        self.assertEqual(self.scope_result('-g', '*.txt', '-g', '!plain.txt'), selected)
+        self.assertEqual(self.scope_result('-g', '!plain.txt', '-g', '*.txt'), selected | {'scope/plain.txt'})
+        for path in ('scope/x.log', 'scope/rg-only.txt', 'scope/.hidden.txt'):
+            result = self.invoke('needle', path)
+            self.assertEqual((result.returncode, result.stdout), (0, 'needle\n'))
+        binary = self.invoke('-n', 'needle', 'scope/binary.dat')
+        self.assertEqual(binary.returncode, 0)
+        self.assertIn('binary file matches', binary.stdout)
+        text = self.invoke('-n', '--text', 'needle', 'scope/binary.dat')
+        self.assertEqual((text.returncode, text.stdout), (0, '1:needle\x00binary\n'))
+
+    def test_gitignore_requires_repository_by_default(self):
+        with tempfile.TemporaryDirectory(prefix='recipkg-rg-nogit-') as temp:
+            directory = Path(temp)
+            (directory / '.gitignore').write_text('ignored.txt\n', encoding='utf-8')
+            (directory / 'ignored.txt').write_text('needle\n', encoding='utf-8')
+            (directory / 'plain.txt').write_text('needle\n', encoding='utf-8')
+            for flags, expected in [([], {'./ignored.txt', './plain.txt'}),
+                                    (['--no-require-git'], {'./plain.txt'})]:
+                with self.subTest(flags=flags):
+                    result = command([self.rg, '--color=never', '-l', *flags, 'needle', '.'],
+                                     cwd=directory, env=self.env)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(set(result.stdout.splitlines()), expected)
 
 
 class FFmpegSamples(unittest.TestCase):
