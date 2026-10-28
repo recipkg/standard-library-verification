@@ -8,7 +8,7 @@
 
 Small, reproducible black-box comparisons for selected contracts in the [Recipkg standard library](https://github.com/recipkg/standard-library). The tests run candidate executables on disposable input and assert user-visible results. They do **not** establish full compatibility, source provenance, secure isolation, or independent reconstruction.
 
-These tests currently correspond to selected observations in `recipkg/jq` v0.1.6 (upstream jq 1.8.2), `recipkg/ripgrep` v0.1.5 (upstream ripgrep 15.2.0), `recipkg/ffmpeg` v0.1.6 (upstream FFmpeg 9.0.2), `recipkg/miniflux` v0.1.6 (upstream source commit `3945f3daa0a90040f761d79a5f62a678fe86ba4e`), `recipkg/syncthing` v0.1.2 (upstream source commit `ed38528d7fba3dd6a42c9c9fc6780af432dc15d2`), and `recipkg/openhands-agent-sdk` v0.1.6 (upstream source commit `46b1fa5cb91ada17e6ec938c7e8624a4fa19fa98`); upstream builds may differ in codecs or features. The jq decnum precision sample explicitly skips targets reporting `have_decnum == false`; a skip is not a pass. Git is required for ripgrep's repository filtering test; FFmpeg needs lavfi, Matroska, WAV, PCM, volume, amix, asplit, rawvideo, RGB24, crop, scale, fps and FFV1 support. jq/ripgrep/FFmpeg/ffprobe are not bundled dependencies.
+These tests currently correspond to selected observations in `recipkg/jq` v0.1.6 (upstream jq 1.8.2), `recipkg/ripgrep` v0.1.5 (upstream ripgrep 15.2.0), `recipkg/ffmpeg` v0.1.6 (upstream FFmpeg 9.0.2), `recipkg/miniflux` v0.1.6 (upstream source commit `3945f3daa0a90040f761d79a5f62a678fe86ba4e`), `recipkg/syncthing` v0.1.2 (upstream source commit `ed38528d7fba3dd6a42c9c9fc6780af432dc15d2`), and `recipkg/openhands-agent-sdk` v0.1.7 (upstream source commit `46b1fa5cb91ada17e6ec938c7e8624a4fa19fa98`); upstream builds may differ in codecs or features. The jq decnum precision sample explicitly skips targets reporting `have_decnum == false`; a skip is not a pass. Git is required for ripgrep's repository filtering test; FFmpeg needs lavfi, Matroska, WAV, PCM, volume, amix, asplit, rawvideo, RGB24, crop, scale, fps and FFV1 support. jq/ripgrep/FFmpeg/ffprobe are not bundled dependencies.
 
 The Vikunja API sample corresponds to `recipkg/vikunja` v0.1.2 and upstream commit `e37ebc0d10db366ff111bc4bb74a696d7cfc912e`.
 
@@ -67,6 +67,8 @@ RECIPKG_TEST_SYNCTHING=/absolute/path/to/syncthing python3 -m unittest discover 
 ```
 
 The OpenHands SDK sample accepts `RECIPKG_TEST_OPENHANDS_PYTHON`, a Python interpreter with the candidate Python SDK installed. It starts a disposable loopback OpenAI-compatible model fixture and checks a custom tool, invalid parameters, approval, rejection, event sequence and restored conversation. It runs with a temporary HOME and workspace, dummy credentials and a Python-level outbound connection guard; this is not a security sandbox or a general compatibility test for non-Python implementations. Without the variable, the sample is skipped.
+
+The same test file also checks project skill discovery and direct invocation using a temporary Git repository and local skill submodule. It uses the SDK's test LLM, blocks Python sockets, and invokes a harmless shell command from a fixture skill in its temporary workspace; this is not an OS sandbox or a model-driven tool-call test. Git must be available.
 
 ```sh
 RECIPKG_TEST_OPENHANDS_PYTHON=/absolute/path/to/python python3 -m unittest discover -s tests -p test_openhands_sdk.py -v
