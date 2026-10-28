@@ -41,12 +41,14 @@ class CanvasRecipePackage(unittest.TestCase):
             with tarfile.open(archive, 'r:gz') as tar:
                 members = {member.name: member for member in tar.getmembers() if member.isfile()}
                 required = ['.deps/agent/PROJECT-SKILLS-OBSERVED.md',
+                            '.deps/agent/FAILURE-RECOVERY-OBSERVED.md',
                             '.deps/agent/.deps/quality/BUILD_PROMPT.md',
                             '.deps/design/.deps/foundation/BUILD_PROMPT.md',
                             '.deps/design/AGENT-INTERACTION.md', 'LOCK.md']
                 for path in required:
                     self.assertIn(path, members)
                 skill_doc = tar.extractfile(members[required[0]]).read()
+                failure_doc = tar.extractfile(members['.deps/agent/FAILURE-RECOVERY-OBSERVED.md']).read()
                 design_doc = tar.extractfile(members['.deps/design/AGENT-INTERACTION.md']).read()
                 lock = tar.extractfile(members['LOCK.md']).read().decode('utf-8')
                 self.assertIn(agent_revision, lock)
@@ -55,6 +57,7 @@ class CanvasRecipePackage(unittest.TestCase):
             build = run('build', archive)
             self.assertEqual(build.returncode, 0, build.stderr)
             self.assertIn(skill_doc.decode('utf-8'), build.stdout)
+            self.assertIn(failure_doc.decode('utf-8'), build.stdout)
             self.assertIn(design_doc.decode('utf-8'), build.stdout)
             self.assertIn(agent_revision, build.stdout)
             corrupted = Path(tmp) / 'corrupted.recipe.tar.gz'
