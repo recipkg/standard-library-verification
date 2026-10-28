@@ -2,6 +2,7 @@
 
 These tests are partial and must not be interpreted as complete compatibility.
 """
+import base64
 import json
 import os
 from pathlib import Path
@@ -190,6 +191,58 @@ class RipgrepSamples(unittest.TestCase):
         invalid = self.invoke('(', 'normal.txt')
         self.assertEqual(invalid.returncode, 2)
         self.assertTrue(invalid.stderr)
+
+    def test_stdin_literal_and_json_byte_offsets(self):
+        data = 'prefix\ncafé cafe\n'.encode('utf-8')
+        result = subprocess.run([self.rg, '--color=never', '--json', 'é|e'],
+                                cwd=self.root, env=self.env, input=data, capture_output=True,
+                                timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        events = [json.loads(line) for line in result.stdout.splitlines()]
+        self.assertEqual([event['type'] for event in events],
+                         ['begin', 'match', 'match', 'end', 'summary'])
+        match = events[2]['data']
+        self.assertEqual(match['path'], {'text': '<stdin>'})
+        self.assertEqual((match['line_number'], match['absolute_offset']), (2, 7))
+        self.assertEqual(match['lines'], {'text': 'café cafe\n'})
+        self.assertEqual([(x['match'], x['start'], x['end']) for x in match['submatches']],
+                         [({'text': 'é'}, 3, 5), ({'text': 'e'}, 9, 10)])
+        for flags, expected in [(['-F'], '1:a.b\n'), ([], '1:a.b\n2:axb\n')]:
+            result = command([self.rg, '--color=never', '-n', *flags, 'a.b'],
+                             cwd=self.root, env=self.env, input='a.b\naxb\n')
+            self.assertEqual((result.returncode, result.stdout), (0, expected), result.stderr)
+
+    def test_json_non_utf8_data(self):
+        result = subprocess.run([self.rg, '--color=never', '--json', 'hit'],
+                                cwd=self.root, env=self.env, input=b'\xff hit\n',
+                                capture_output=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        events = [json.loads(line) for line in result.stdout.splitlines()]
+        match = next(event['data'] for event in events if event['type'] == 'match')
+        self.assertEqual(base64.b64decode(match['lines']['bytes']), b'\xff hit\n')
+        self.assertEqual(match['submatches'][0], {'match': {'text': 'hit'}, 'start': 2, 'end': 5})
+
+    @unittest.skipUnless(os.name == 'posix', 'non-UTF-8 filenames require POSIX bytes paths')
+    def test_json_non_utf8_filename(self):
+        filename = b'bad-\xff.txt'
+        fd = os.open(os.fsencode(self.root) + b'/' + filename, os.O_WRONLY | os.O_CREAT, 0o600)
+        with os.fdopen(fd, 'wb') as file:
+            file.write(b'hit\n')
+        result = self.invoke('--json', 'hit', os.fsdecode(filename))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        events = [json.loads(line) for line in result.stdout.splitlines()]
+        match = next(event['data'] for event in events if event['type'] == 'match')
+        self.assertEqual(base64.b64decode(match['path']['bytes']), filename)
+        self.assertEqual(match['lines'], {'text': 'hit\n'})
+
+    def test_partial_file_error_and_quiet(self):
+        result = self.invoke('-n', 'needle', 'normal.txt', 'missing.txt')
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('normal.txt:3:needle two', result.stdout)
+        self.assertIn('missing.txt', result.stderr)
+        quiet = self.invoke('-q', 'needle', 'normal.txt', 'missing.txt')
+        self.assertEqual(quiet.returncode, 0)
+        self.assertEqual(quiet.stdout, '')
 
     def make_scope(self):
         scope = self.root / 'scope'
