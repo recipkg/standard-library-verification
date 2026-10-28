@@ -172,6 +172,53 @@ class JqSamples(unittest.TestCase):
             result = self.invoke(['-ce', '.'], data)
             self.assertEqual((result.returncode, result.stdout, result.stderr), (expected, data, ''))
 
+    def test_json_parsing_boundaries(self):
+        cases = [
+            (b'{"a":1,"a":2}', b'{"a":2}\n'),
+            (b'1 2 {}[]', b'1\n2\n{}\n[]\n'),
+            (b'01', b'1\n'),
+            (b'-.2', b'-0.2\n'),
+            (b'+1', b'1\n'),
+            (b'"\\uD83D\\uDE00"', '"😀"\n'.encode()),
+            (b'"\\uDC00"', '"�"\n'.encode()),
+            (b'"a\\u0000b"', b'"a\\u0000b"\n'),
+            (b'"\xff"', '"�"\n'.encode()),
+        ]
+        for source, expected in cases:
+            with self.subTest(source=source):
+                result = subprocess.run([self.jq, '-c', '.'], input=source,
+                                        capture_output=True, timeout=30)
+                self.assertEqual((result.returncode, result.stdout, result.stderr), (0, expected, b''))
+        failures = [(b'1e', b''), (b'"\\uD800"', b''), (b'"line\nline"', b''),
+                    (b'"\\q"', b''), (b'"a\0b"', b''), (b'{"x":1,}', b''),
+                    (b'[1,]', b''), (b'[] {"x":', b'[]\n'), (b'1 garbage 2', b'1\n')]
+        for source, expected in failures:
+            with self.subTest(source=source):
+                result = subprocess.run([self.jq, '-c', '.'], input=source,
+                                        capture_output=True, timeout=30)
+                self.assertEqual((result.returncode, result.stdout), (5, expected))
+                self.assertTrue(result.stderr)
+
+    def test_decnum_literal_and_arithmetic(self):
+        capability = self.invoke(['-n', 'have_decnum'])
+        self.assertEqual(capability.returncode, 0, capability.stderr)
+        self.assertIn(capability.stdout.strip(), ('true', 'false'))
+        if capability.stdout.strip() == 'false':
+            self.skipTest('samples require a target built with decnum')
+        source = '9007199254740993 123456789012345678901234567890'
+        result = self.invoke(['-c', '.'], source)
+        self.assertEqual((result.returncode, result.stdout, result.stderr),
+                         (0, '9007199254740993\n123456789012345678901234567890\n', ''))
+        result = self.invoke(['-cn', '[9007199254740993 == 9007199254740992, (9007199254740993|.+0)]'])
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, '[false,9007199254740992]\n', ''))
+
+    def test_json_sequence_error_recovery(self):
+        source = b'\x1e1\n\x1e{bad}\n\x1e{"ok":2}\n'
+        result = subprocess.run([self.jq, '--seq', '-c', '.'], input=source,
+                                capture_output=True, timeout=30)
+        self.assertEqual((result.returncode, result.stdout), (0, b'\x1e1\n\x1e{"ok":2}\n'))
+        self.assertTrue(result.stderr)
+
 
 class RipgrepSamples(unittest.TestCase):
     @classmethod
