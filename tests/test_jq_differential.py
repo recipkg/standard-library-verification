@@ -8,6 +8,38 @@ import unittest
 
 
 class JqDifferential(unittest.TestCase):
+    def test_decimal_rounding_boundaries(self):
+        target = os.environ.get('RECIPKG_TEST_JQ')
+        reference = os.environ.get('RECIPKG_TEST_JQ_REFERENCE')
+        if not target and not reference:
+            self.skipTest('set RECIPKG_TEST_JQ and RECIPKG_TEST_JQ_REFERENCE')
+        if not target or not reference:
+            self.fail('both target and reference must be specified')
+        target, reference = shutil.which(target), shutil.which(reference)
+        self.assertIsNotNone(target, 'jq target not found')
+        self.assertIsNotNone(reference, 'jq reference not found')
+        self.assertNotEqual(os.path.realpath(target), os.path.realpath(reference))
+        rng = random.Random(45829)
+        values = ['484090505180912385e1', '5253265562710.54996e4',
+                  '351060153116105761.9598', '1e9999', '-1e9999',
+                  '1e-9999', '-1e-9999', '9.99999999999999995e307',
+                  '1.79769313486231585e308']
+        for _ in range(2500):
+            digits = str(rng.randrange(1, 10)) + ''.join(str(rng.randrange(10)) for _ in range(16))
+            tail = rng.choice(['5', '50', '500', '5001', '4999', '6', '4', '99999999'])
+            values.append(rng.choice(['', '-']) + digits + tail + 'e' + str(rng.randrange(-340, 320)))
+        outputs = []
+        for exe in (reference, target):
+            result = subprocess.run([exe, '-c', '.+0'], input=('\n'.join(values) + '\n').encode(),
+                                    capture_output=True, timeout=30)
+            self.assertEqual((result.returncode, result.stderr), (0, b''))
+            lines = result.stdout.splitlines()
+            self.assertEqual(len(lines), len(values))
+            outputs.append(lines)
+        differences = [(value, expected, actual) for value, expected, actual
+                       in zip(values, *outputs) if expected != actual]
+        self.assertEqual(differences[:10], [], f'{len(differences)} differing outputs')
+
     def test_number_literals_and_arithmetic_exact_output(self):
         target = os.environ.get('RECIPKG_TEST_JQ')
         reference = os.environ.get('RECIPKG_TEST_JQ_REFERENCE')
