@@ -213,6 +213,45 @@ class JqSamples(unittest.TestCase):
             result = self.invoke(['-ce', '.'], data)
             self.assertEqual((result.returncode, result.stdout, result.stderr), (expected, data, ''))
 
+    def test_input_and_slurp_interactions(self):
+        for args, source, expected in [
+            (['-cn', '[input,input]'], '1 2 3', '[1,2]\n'),
+            (['-c', '[.,input]'], '1 2 3 4', '[1,2]\n[3,4]\n'),
+            (['-cn', '[input?]'], '', '[]\n'),
+            (['-csn', '[inputs]'], '1 2 3', '[[1,2,3]]\n'),
+            (['-Rcn', '[inputs]'], 'abc\n\nx\n', '["abc","","x"]\n'),
+            (['-Rscn', '[inputs]'], 'abc\n\nx\n', '["abc\\n\\nx\\n"]\n'),
+        ]:
+            with self.subTest(args=args):
+                result = self.invoke(args, source)
+                self.assertEqual((result.returncode, result.stdout, result.stderr), (0, expected, ''))
+        with tempfile.TemporaryDirectory(prefix='recipkg-jq-slurp-') as tmp:
+            root = Path(tmp)
+            (root / 'a').write_text('1\n2\n', encoding='utf-8')
+            (root / 'b').write_text('3\n', encoding='utf-8')
+            for args, expected in [(['-sc', '.', 'a', 'b'], '[1,2,3]\n'),
+                                   (['-Rsc', '.', 'a', 'b'], '"1\\n2\\n3\\n"\n'),
+                                   (['-nc', '[inputs]', 'a', 'b'], '[1,2,3]\n'),
+                                   (['-nc', '1', 'missing'], '1\n')]:
+                with self.subTest(args=args):
+                    result = command([self.jq, *args], cwd=root, input='')
+                    self.assertEqual((result.returncode, result.stdout, result.stderr), (0, expected, ''))
+            result = command([self.jq, '-ce', '.', 'missing', 'b'], cwd=root, input='')
+            self.assertEqual((result.returncode, result.stdout), (2, '3\n'))
+            self.assertTrue(result.stderr)
+            for first, second, args, expected in [
+                ('[', '1]', ['-c', '.'], '[1]\n'),
+                ('1', '2', ['-c', '.'], '12\n'),
+                ('abc', 'def\nxyz', ['-Rc', '.'], '"abcdef"\n"xyz"\n'),
+            ]:
+                (root / 'a').write_text(first, encoding='utf-8')
+                (root / 'b').write_text(second, encoding='utf-8')
+                result = command([self.jq, *args, 'a', 'b'], cwd=root, input='')
+                self.assertEqual((result.returncode, result.stdout, result.stderr), (0, expected, ''))
+        result = self.invoke(['-n', '--raw-output0', '"one","bad\\u0000text","after"'])
+        self.assertEqual((result.returncode, result.stdout), (5, 'one\0'))
+        self.assertTrue(result.stderr)
+
     def test_json_parsing_boundaries(self):
         cases = [
             (b'{"a":1,"a":2}', b'{"a":2}\n'),
