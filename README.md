@@ -14,7 +14,7 @@ The Vikunja API sample corresponds to `recipkg/vikunja` v0.1.2 and upstream comm
 
 The OpenClaw Gateway sample was observed with npm `openclaw@2026.10.8` (`dc2523e`), a different commit from the current `recipkg/openclaw` recipe. See that recipe's `GATEWAY-RELEASE-OBSERVED.md` for its provenance and limitations.
 
-The optional regex samples correspond to `recipkg/regex` v0.1.0 and the upstream `regex` 1.13.0 crate. Set `RECIPKG_TEST_REGEX_ADAPTER` to an adapter for the engine being tested. It accepts `PATTERN TEXT` as arguments and emits `{"matches":[[start,end],...]}` using UTF-8 byte offsets (exit 0), or `{"error":"compile"}` for invalid patterns (exit 2); `--version` identifies the adapter. This adapter protocol is only for testing and does not prescribe the engine's implementation language or product API. An absent variable skips the class; an explicitly invalid target fails.
+The optional regex samples correspond to `recipkg/regex` v0.1.1 and the upstream `regex` 1.13.0 crate. Set `RECIPKG_TEST_REGEX_ADAPTER` to an adapter for the engine being tested. It accepts `PATTERN TEXT` for UTF-8 strings, or `--bytes PATTERN HEX` for raw bytes, and emits `{"matches":[[start,end],...]}` using byte offsets (exit 0), or `{"error":"compile"}` for invalid patterns (exit 2); `--version` identifies the adapter. This adapter protocol is only for testing and does not prescribe the engine's implementation language or product API. An absent variable skips the class; an explicitly invalid target fails.
 
 For comparison with the upstream crate, build the included reference adapter with Rust and Cargo, using a disposable output directory:
 

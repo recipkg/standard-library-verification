@@ -25,6 +25,11 @@ class RegexSamples(unittest.TestCase):
         p = subprocess.run([self.adapter, pattern, text], capture_output=True, text=True, timeout=20)
         return p.returncode, json.loads(p.stdout)
 
+    def invoke_bytes(self, pattern, data):
+        p = subprocess.run([self.adapter, '--bytes', pattern, data.hex()],
+                           capture_output=True, text=True, timeout=20)
+        return p.returncode, json.loads(p.stdout)
+
     def test_alternation_and_greed(self):
         cases = [('sam|samwise', 'samwise', [[0, 3]]),
                  ('samwise|sam', 'samwise', [[0, 7]]),
@@ -55,6 +60,28 @@ class RegexSamples(unittest.TestCase):
         for pattern in ('(?=a)', r'(a)\1', '['):
             with self.subTest(pattern=pattern):
                 self.assertEqual(self.invoke(pattern, 'aa'), (2, {'error': 'compile'}))
+
+    def test_byte_mode_empty_matches_can_split_utf8(self):
+        self.assertEqual(self.invoke('', 'éx'), (0, {'matches': [[0, 0], [2, 2], [3, 3]]}))
+        self.assertEqual(self.invoke_bytes('', 'éx'.encode()),
+                         (0, {'matches': [[0, 0], [1, 1], [2, 2], [3, 3]]}))
+        self.assertEqual(self.invoke_bytes('', b'\xff'), (0, {'matches': [[0, 0], [1, 1]]}))
+
+    def test_byte_mode_unicode_and_raw_bytes(self):
+        data = b'\xffa\xc3\xa9'
+        self.assertEqual(self.invoke_bytes('.', data), (0, {'matches': [[1, 2], [2, 4]]}))
+        self.assertEqual(self.invoke_bytes(r'(?-u:.)', data),
+                         (0, {'matches': [[0, 1], [1, 2], [2, 3], [3, 4]]}))
+        self.assertEqual(self.invoke_bytes(r'(?-u:\xFF)', b'a\xffb\xff'),
+                         (0, {'matches': [[1, 2], [3, 4]]}))
+        self.assertEqual(self.invoke_bytes(r'\xFF', b'\xff\xc3\xbf'),
+                         (0, {'matches': [[1, 3]]}))
+
+    def test_byte_mode_unicode_word_and_invalid_pattern(self):
+        data = b'\xffabc\xc3\xa9'
+        self.assertEqual(self.invoke_bytes(r'\w+', data), (0, {'matches': [[1, 6]]}))
+        self.assertEqual(self.invoke_bytes(r'(?-u:\w+)', data), (0, {'matches': [[1, 4]]}))
+        self.assertEqual(self.invoke_bytes('(?=a)', data), (2, {'error': 'compile'}))
 
 
 if __name__ == '__main__':
