@@ -260,6 +260,7 @@ class JqSamples(unittest.TestCase):
              [[['a', 'b'], 1], [['a', 'b']], [['c', 0], True],
               [['c', 1], None], [['c', 1]], [['c']]]),
             ('1 2', [[[], 1], [[], 2]]),
+            ('1"a"', [[[], 1], [[], 'a']]),
         ]
         for source, expected in cases:
             with self.subTest(source=source):
@@ -392,6 +393,27 @@ class JqSamples(unittest.TestCase):
                 self.assertEqual((result.returncode, result.stdout), (5, expected))
                 self.assertTrue(result.stderr)
 
+    def test_relaxed_number_and_surrogate_boundaries(self):
+        cases = [(b'00012', b'12\n'), (b'-001', b'-1\n'), (b'+001', b'1\n'),
+                 (b'.5', b'0.5\n'), (b'-.5', b'-0.5\n'), (b'1.', b'1\n'),
+                 (b'+1.2', b'1.2\n'), (b'[01,+1,-.2,1.]', b'[1,1,-0.2,1]\n'),
+                 (b'{"n":01,"m":-.2}', b'{"n":1,"m":-0.2}\n'),
+                 (b'1 01 2', b'1\n1\n2\n'),
+                 (b'{"\\uDC00":"\\uDC00"}', '{"�":"�"}\n'.encode())]
+        for source, expected in cases:
+            with self.subTest(source=source):
+                result = subprocess.run([self.jq, '-c', '.'], input=source, capture_output=True, timeout=30)
+                self.assertEqual((result.returncode, result.stdout, result.stderr), (0, expected, b''))
+        for source in (b'1..2', b'--1', b'1e-', b'1true', b'1_0', b'0x10',
+                       b'["\\uD800"]', b'"\\uD800\\u0041"'):
+            with self.subTest(source=source):
+                result = subprocess.run([self.jq, '-c', '.'], input=source, capture_output=True, timeout=30)
+                self.assertEqual((result.returncode, result.stdout), (5, b''))
+                self.assertTrue(result.stderr)
+        result = subprocess.run([self.jq, '-c', '.'], input=b'2 1..2', capture_output=True, timeout=30)
+        self.assertEqual((result.returncode, result.stdout), (5, b'2\n'))
+        self.assertTrue(result.stderr)
+
     def test_decnum_literal_and_arithmetic(self):
         capability = self.invoke(['-n', 'have_decnum'])
         self.assertEqual(capability.returncode, 0, capability.stderr)
@@ -404,6 +426,12 @@ class JqSamples(unittest.TestCase):
                          (0, '9007199254740993\n123456789012345678901234567890\n', ''))
         result = self.invoke(['-cn', '[9007199254740993 == 9007199254740992, (9007199254740993|.+0)]'])
         self.assertEqual((result.returncode, result.stdout, result.stderr), (0, '[false,9007199254740992]\n', ''))
+        for source, expected in [(b'1.00', b'1.00\n'), (b'000.100', b'0.100\n'),
+                                 (b'1e2', b'1E+2\n'), (b'-0', b'-0\n'),
+                                 (b'1e9999', b'1E+9999\n')]:
+            with self.subTest(source=source):
+                output = subprocess.run([self.jq, '-c', '.'], input=source, capture_output=True, timeout=30)
+                self.assertEqual((output.returncode, output.stdout, output.stderr), (0, expected, b''))
 
     def test_json_sequence_error_recovery(self):
         source = b'\x1e1\n\x1e{bad}\n\x1e{"ok":2}\n'

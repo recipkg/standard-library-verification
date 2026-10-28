@@ -8,6 +8,40 @@ import unittest
 
 
 class JqDifferential(unittest.TestCase):
+    def test_json_relaxed_literals_and_nested_unicode(self):
+        target = os.environ.get('RECIPKG_TEST_JQ')
+        reference = os.environ.get('RECIPKG_TEST_JQ_REFERENCE')
+        if not target and not reference:
+            self.skipTest('set RECIPKG_TEST_JQ and RECIPKG_TEST_JQ_REFERENCE')
+        if not target or not reference:
+            self.fail('both target and reference must be specified')
+        target, reference = shutil.which(target), shutil.which(reference)
+        self.assertIsNotNone(target, 'jq target not found')
+        self.assertIsNotNone(reference, 'jq reference not found')
+        self.assertNotEqual(os.path.realpath(target), os.path.realpath(reference))
+        rng = random.Random(1347)
+        tokens = ['01', '+2', '-003', '.5', '-.2', '1.', '+1.2', '00012']
+        for _ in range(25):
+            a, b = rng.choice(tokens), rng.choice(tokens)
+            sources = [a, f'[{a},{b}]', f'{{"a":{a},"b":{b}}}', f'{a} {b}']
+            for source in sources:
+                with self.subTest(source=source):
+                    outputs = []
+                    for exe in (reference, target):
+                        result = subprocess.run([exe, '-c', '.'], input=source.encode(),
+                                                capture_output=True, timeout=10)
+                        self.assertEqual((result.returncode, result.stderr), (0, b''))
+                        outputs.append(result.stdout)
+                    self.assertEqual(outputs[0], outputs[1])
+        for source in (b'{"\\uDC00":"\\uDC00"}', b'["\\uD800"]',
+                       b'"\\uD800\\u0041"', b'2 1..2'):
+            with self.subTest(source=source):
+                outputs = []
+                for exe in (reference, target):
+                    result = subprocess.run([exe, '-c', '.'], input=source, capture_output=True, timeout=10)
+                    outputs.append((result.returncode, result.stdout, bool(result.stderr)))
+                self.assertEqual(outputs[0], outputs[1])
+
     def test_sequence_recovery_and_stream_modes(self):
         target = os.environ.get('RECIPKG_TEST_JQ')
         reference = os.environ.get('RECIPKG_TEST_JQ_REFERENCE')
