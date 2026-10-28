@@ -1,6 +1,7 @@
 """Finite RESP2 contract samples against an explicitly selected Valkey server."""
 import os
 from pathlib import Path
+import signal
 import shutil
 import socket
 import subprocess
@@ -22,7 +23,11 @@ class Client:
     def __init__(self, path):
         self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.socket.settimeout(5)
-        self.socket.connect(str(path))
+        try:
+            self.socket.connect(str(path))
+        except OSError:
+            self.socket.close()
+            raise
         self.reader = self.socket.makefile('rb')
 
     def close(self):
@@ -84,11 +89,13 @@ class ValkeySamples(unittest.TestCase):
         self.addCleanup(self.stop)
         self.start()
 
-    def start(self, *, appendonly=False):
+    def start(self, *, appendonly=False, tcp_port=0):
         self.process = subprocess.Popen([
-            self.server, '--port', '0', '--unixsocket', str(self.path), '--unixsocketperm', '700',
+            self.server, '--port', str(tcp_port), '--bind', '127.0.0.1',
+            '--unixsocket', str(self.path), '--unixsocketperm', '700',
             '--daemonize', 'no', '--protected-mode', 'yes', '--save', '',
             '--appendonly', 'yes' if appendonly else 'no', '--appendfsync', 'always',
+            '--repl-diskless-sync-delay', '0',
             '--dir', str(self.directory), '--dbfilename', 'snapshot.rdb', '--loglevel', 'warning',
         ], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         deadline = time.monotonic() + 5
@@ -257,6 +264,93 @@ class ValkeySamples(unittest.TestCase):
         self.assertEqual(c.command('GET', 'stored'), b'\x00\xff')
         self.assertEqual(c.command('HGET', 'hash', 'name'), b'value')
         self.assertIs(c.command('GET', 'removed'), NULL_BULK)
+
+    def test_aof_acknowledged_writes_after_process_kill(self):
+        self.stop(require_clean=True)
+        self.start(appendonly=True)
+        c = self.client()
+        self.assertEqual(c.command('CONFIG', 'GET', 'appendfsync'), [b'appendfsync', b'always'])
+        self.assertEqual(c.command('SET', 'stored', b'\x00\xff'), b'OK')
+        self.assertEqual(c.command('HSET', 'hash', 'name', 'value'), 1)
+        self.assertEqual(c.command('SET', 'removed', 'temporary'), b'OK')
+        self.assertEqual(c.command('DEL', 'removed'), 1)
+        process = self.process
+        process.kill()
+        self.assertEqual(process.wait(timeout=5), -signal.SIGKILL)
+        self.stop()
+        self.assertFalse((self.directory / 'snapshot.rdb').exists())
+        self.start(appendonly=True)
+        c = self.client()
+        self.assertEqual(c.command('GET', 'stored'), b'\x00\xff')
+        self.assertEqual(c.command('HGET', 'hash', 'name'), b'value')
+        self.assertIs(c.command('GET', 'removed'), NULL_BULK)
+
+    def test_replication_initial_sync_and_live_changes(self):
+        self.stop(require_clean=True)
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as reservation:
+            reservation.bind(('127.0.0.1', 0))
+            primary_port = reservation.getsockname()[1]
+        self.start(tcp_port=primary_port)
+        primary = self.client()
+        self.assertEqual(primary.command('SET', 'before-sync', b'\x00\xff'), b'OK')
+        self.assertEqual(primary.command('HSET', 'hash', 'field', 'before'), 1)
+
+        replica_directory = self.directory / 'replica'
+        replica_directory.mkdir()
+        replica_path = replica_directory / 'server.sock'
+        replica_process = subprocess.Popen([
+            self.server, '--port', '0', '--unixsocket', str(replica_path), '--unixsocketperm', '700',
+            '--daemonize', 'no', '--protected-mode', 'yes', '--save', '', '--appendonly', 'no',
+            '--dir', str(replica_directory), '--replicaof', '127.0.0.1', str(primary_port),
+            '--loglevel', 'warning',
+        ], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        def stop_replica():
+            if replica_process.poll() is None:
+                replica_process.terminate()
+                try:
+                    replica_process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    replica_process.kill()
+                    replica_process.wait(timeout=5)
+        self.addCleanup(stop_replica)
+        deadline = time.monotonic() + 15
+        replica = None
+        while time.monotonic() < deadline:
+            if replica_process.poll() is not None:
+                self.fail(f'replica exited during startup: {replica_process.returncode}')
+            try:
+                replica = Client(replica_path)
+                self.clients.append(replica)
+                break
+            except (ConnectionRefusedError, FileNotFoundError):
+                time.sleep(0.02)
+        self.assertIsNotNone(replica, 'replica Unix socket did not become ready')
+
+        def wait_for(command, expected):
+            deadline = time.monotonic() + 15
+            last = None
+            while time.monotonic() < deadline:
+                if replica_process.poll() is not None:
+                    self.fail(f'replica exited during sync: {replica_process.returncode}')
+                last = replica.command(*command)
+                if last == expected:
+                    return
+                if isinstance(last, RespError) and not last.value.startswith(b'LOADING'):
+                    self.fail(f'unexpected replica response: {last.value!r}')
+                time.sleep(0.02)
+            self.fail(f'replica did not reach expected state for {command!r}; got {last!r}')
+
+        wait_for(('GET', 'before-sync'), b'\x00\xff')
+        wait_for(('HGET', 'hash', 'field'), b'before')
+        readonly = replica.command('SET', 'forbidden', 'value')
+        self.assertIsInstance(readonly, RespError)
+        self.assertTrue(readonly.value.startswith(b'READONLY'))
+        self.assertEqual(primary.command('SET', 'live', 'updated'), b'OK')
+        self.assertEqual(primary.command('DEL', 'before-sync'), 1)
+        wait_for(('GET', 'live'), b'updated')
+        wait_for(('GET', 'before-sync'), NULL_BULK)
+        self.assertIs(primary.command('GET', 'forbidden'), NULL_BULK)
 
 
 if __name__ == '__main__':

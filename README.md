@@ -10,13 +10,13 @@ Small, reproducible black-box comparisons for selected contracts in the [Recipkg
 
 These tests currently correspond to selected observations in `recipkg/jq` v0.1.16 (upstream jq 1.8.2), `recipkg/ripgrep` v0.1.5 (upstream ripgrep 15.2.0), `recipkg/ffmpeg` v0.1.7 (upstream FFmpeg 9.0.2), `recipkg/miniflux` v0.1.7 (upstream source commit `3945f3daa0a90040f761d79a5f62a678fe86ba4e`), `recipkg/syncthing` v0.1.3 (upstream source commit `ed38528d7fba3dd6a42c9c9fc6780af432dc15d2`), and `recipkg/openhands-agent-sdk` v0.1.8 (upstream source commit `46b1fa5cb91ada17e6ec938c7e8624a4fa19fa98`); upstream builds may differ in codecs or features. The jq decnum precision sample explicitly skips targets reporting `have_decnum == false`; a skip is not a pass. Git is required for ripgrep's repository filtering test; FFmpeg needs lavfi, Matroska, WAV, PCM, volume, amix, asplit, rawvideo, RGB24, crop, scale, fps and FFV1 support. jq/ripgrep/FFmpeg/ffprobe are not bundled dependencies.
 
-The `recipkg/valkey` v0.1.1 samples were observed on the CachyOS Valkey 9.1.2-1.1 binary; its reported source prefix is `7f1dffed`, but its complete build provenance is not independently established. Set an explicit executable to run eight finite RESP2 samples using a fresh process, disposable directory and Unix socket with TCP disabled:
+The `recipkg/valkey` v0.1.2 samples were observed on the CachyOS Valkey 9.1.2-1.1 binary; its reported source prefix is `7f1dffed`, but its complete build provenance is not independently established. Set an explicit executable to run ten finite RESP2 samples using fresh processes, disposable directories and Unix sockets. The replication sample additionally opens a temporary TCP listener on loopback:
 
 ```sh
 RECIPKG_TEST_VALKEY_SERVER=/absolute/path/to/valkey-server python3 -m unittest discover -s tests -p test_valkey.py -v
 ```
 
-They check selected binary values, conditional expiration, transaction errors and conflicts, scoped ACL and normal RDB/AOF restart behavior; they do not validate all commands, crash recovery, networking, security or an independent reconstruction. An unspecified target is skipped; an explicitly missing target fails.
+They check selected binary values, conditional expiration, transaction errors and conflicts, scoped ACL, normal RDB/AOF restart, acknowledged AOF writes after a process kill, and basic local replication. These cases do not validate all commands, power-loss recovery, distributed failure, security or an independent reconstruction. An unspecified target is skipped; an explicitly missing target fails.
 
 The Vikunja API sample corresponds to `recipkg/vikunja` v0.1.3 and upstream commit `e37ebc0d10db366ff111bc4bb74a696d7cfc912e`.
 
