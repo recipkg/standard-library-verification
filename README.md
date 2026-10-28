@@ -18,6 +18,14 @@ RECIPKG_TEST_VALKEY_SERVER=/absolute/path/to/valkey-server python3 -m unittest d
 
 They check selected binary values, conditional expiration, transaction errors and conflicts, scoped ACL, normal RDB/AOF restart, acknowledged AOF writes after a process kill, and local replication including replica restart and manual promotion. These cases do not validate all commands, power-loss recovery, network partition, automatic failover, security or an independent reconstruction. An unspecified target is skipped; an explicitly missing target fails.
 
+For the opt-in real Git pin integration test, supply the Recipkg CLI and allow network access:
+
+```sh
+RECIPKG_TEST_CLI="$(command -v recipkg)" RECIPKG_TEST_GIT_PIN_NETWORK=1 python3 -m unittest discover -s tests -p test_git_pin_package.py -v
+```
+
+It fetches two fixed published Valkey recipe commits, checks their nested quality dependency and lock revisions, compares repeated archives byte for byte, and installs/builds both versions in a temporary store with Git absent from `PATH` and proxy endpoints disabled. This tests package context and version selection, not the correctness or reconstruction of Valkey.
+
 The Vikunja API sample corresponds to `recipkg/vikunja` v0.1.3 and upstream commit `e37ebc0d10db366ff111bc4bb74a696d7cfc912e`.
 
 The OpenClaw Gateway sample was observed with npm `openclaw@2026.10.8` (`dc2523e`), a different commit from the current `recipkg/openclaw` recipe. See that recipe's `GATEWAY-RELEASE-OBSERVED.md` for its provenance and limitations.
