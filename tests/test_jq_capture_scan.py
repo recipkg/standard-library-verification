@@ -78,6 +78,7 @@ class JqCaptureScanSamples(unittest.TestCase):
         cases = [
             ('capture("(?<a>[a-z]+)-(?<n>[0-9]+)")', "xyzzy-14"),
             ('capture("(?<a>a)?(?<b>b*)")', "bb"),
+            ('capture("(?<x>a)"; null)', "aa"),
             ('capture("missing")', "abc"),
             ('capture("(foo)")', "foo"),
         ]
@@ -102,6 +103,7 @@ class JqCaptureScanSamples(unittest.TestCase):
             ('scan("(a)?(b*)"; "g")', "bb"),
             ('scan("(a)?(b*)"; "gn")', "bb"),
             ('scan("(?<x>foo)"; "ig")', "foo FOO"),
+            ('scan("(a)?(b*)"; null)', "bb"),
             ('scan("(?=.)"; "g")', "aβc"),
         ]
         for expression, source in cases:
