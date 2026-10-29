@@ -52,6 +52,10 @@ class JqPathSamples(unittest.TestCase):
                 result = self.run_filter(self.target, '[paths]', source)
                 self.assertEqual((result.returncode, result.stderr), (0, ''))
                 self.assertEqual(json.loads(result.stdout), expected)
+        source = {'a': [1, {'b': 2}], 'c': True}
+        result = self.run_filter(self.target, '[paths(type == "number")]', source)
+        self.assertEqual((result.returncode, result.stderr), (0, ''))
+        self.assertEqual(json.loads(result.stdout), [['a', 0], ['a', 1, 'b']])
 
     def test_seeded_differential(self):
         reference = os.environ.get('RECIPKG_TEST_JQ_REFERENCE')
