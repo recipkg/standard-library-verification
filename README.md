@@ -86,6 +86,12 @@ Syncthing samples require an explicitly supplied `RECIPKG_TEST_SYNCTHING` binary
 RECIPKG_TEST_SYNCTHING=/absolute/path/to/syncthing python3 -m unittest discover -s tests -p test_syncthing.py -v
 ```
 
+The Gitea sample accepts `RECIPKG_TEST_GITEA`, a candidate executable. It starts a server with a temporary HOME, SQLite database, dummy accounts, SSH and registration disabled, and a loopback HTTP listener. It checks private Git push/clone, read-only collaboration, issue authorization and content-version conflicts, then normal restart. Git and the SQLite-capable candidate are required; set `RECIPKG_TEST_GITEA_STATIC_ROOT` when the candidate uses non-embedded templates/assets. The fixture does not enforce an OS/network sandbox, test a full browser frontend, or use real credentials or repositories. It removes its disposable data only after the server stops; without the executable the sample is skipped.
+
+```sh
+RECIPKG_TEST_GITEA=/absolute/path/to/gitea RECIPKG_TEST_GITEA_STATIC_ROOT=/absolute/path/to/source python3 -m unittest discover -s tests -p test_gitea.py -v
+```
+
 The OpenHands SDK sample accepts `RECIPKG_TEST_OPENHANDS_PYTHON`, a Python interpreter with the candidate Python SDK installed. It starts a disposable loopback OpenAI-compatible model fixture and checks a custom tool, invalid parameters, approval, rejection, event sequence, restored conversation, and simulated authentication failure before and after a side effect. It runs with a temporary HOME and workspace, dummy credentials and a Python-level outbound connection guard; this is not a security sandbox or a general compatibility test for non-Python implementations. Without the variable, the sample is skipped.
 
 The same test file also checks project skill discovery and direct invocation using a temporary Git repository and local skill submodule. It uses the SDK's test LLM, blocks Python sockets, and invokes a harmless shell command from a fixture skill in its temporary workspace; this is not an OS sandbox or a model-driven tool-call test. Git must be available.
