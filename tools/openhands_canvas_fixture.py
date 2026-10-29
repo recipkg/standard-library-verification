@@ -37,9 +37,16 @@ async def main(ROOT, BUILD):
         data = await req.json()
         with (ROOT / 'model-requests.jsonl').open('a') as out:
             out.write(json.dumps(data) + '\n')
+        mode = (ROOT / 'model-mode').read_text().strip() if (ROOT / 'model-mode').exists() else 'success'
+        if mode == 'auth' or (mode == 'tool-then-auth' and (ROOT / 'work' / 'fixture-marker.txt').exists()):
+            return web.json_response({'error': {'message': 'fixture-invalid-credential',
+                                      'type': 'authentication_error', 'code': 'invalid_api_key'}}, status=401)
         finish_available = any(t.get('function', {}).get('name') == 'finish' for t in data.get('tools', []))
         message = {'role':'assistant','content':'Canvas fixture reply'}
-        if finish_available:
+        if mode == 'tool-then-auth' and data.get('stream'):
+            message['tool_calls'] = [{'id':'call-terminal-fixture','type':'function', 'function':{'name':'terminal','arguments':json.dumps({'command':"printf 'executed\\n' >> fixture-marker.txt"})}}]
+            finish_available = True
+        elif finish_available:
             message['tool_calls'] = [{'id':'call-finish-fixture','type':'function',
                                       'function':{'name':'finish','arguments':json.dumps({'message':'Canvas fixture reply'})}}]
         if data.get('stream'):
@@ -106,7 +113,9 @@ async def main(ROOT, BUILD):
         else: raise RuntimeError('server readiness timed out')
         print(json.dumps({'canvas_url':f'http://127.0.0.1:{proxy_port}',
                           'model_base_url':f'http://127.0.0.1:{model_port}/v1',
-                          'workspace':str(ROOT / 'work'), 'session_key':'fixture-session-key'}), flush=True)
+                          'workspace':str(ROOT / 'work'), 'fixture_root':str(ROOT),
+                          'server_url':f'http://127.0.0.1:{server_port}',
+                          'session_key':'fixture-session-key'}), flush=True)
         await asyncio.Event().wait()
     finally:
         await proxy_runner.cleanup(); await model_runner.cleanup(); await session.close()

@@ -41,6 +41,7 @@ class CanvasRecipePackage(unittest.TestCase):
             with tarfile.open(archive, 'r:gz') as tar:
                 members = {member.name: member for member in tar.getmembers() if member.isfile()}
                 required = ['.deps/agent/PROJECT-SKILLS-OBSERVED.md',
+                            'AUTH-ERROR-BROWSER-OBSERVED.md',
                             '.deps/agent/FAILURE-RECOVERY-OBSERVED.md',
                             '.deps/agent/.deps/quality/BUILD_PROMPT.md',
                             '.deps/design/.deps/foundation/BUILD_PROMPT.md',
@@ -52,11 +53,14 @@ class CanvasRecipePackage(unittest.TestCase):
                 design_doc = tar.extractfile(members['.deps/design/AGENT-INTERACTION.md']).read()
                 lock = tar.extractfile(members['LOCK.md']).read().decode('utf-8')
                 self.assertIn(agent_revision, lock)
+                self.assertIn(b'fixture-invalid-credential', failure_doc)
+                canvas_error_doc = tar.extractfile(members['AUTH-ERROR-BROWSER-OBSERVED.md']).read()
                 captured = [(member, tar.extractfile(member).read()) for member in tar.getmembers()
                             if member.isfile()]
             build = run('build', archive)
             self.assertEqual(build.returncode, 0, build.stderr)
             self.assertIn(skill_doc.decode('utf-8'), build.stdout)
+            self.assertIn(canvas_error_doc.decode('utf-8'), build.stdout)
             self.assertIn(failure_doc.decode('utf-8'), build.stdout)
             self.assertIn(design_doc.decode('utf-8'), build.stdout)
             self.assertIn(agent_revision, build.stdout)
