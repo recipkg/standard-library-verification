@@ -899,6 +899,27 @@ class FFmpegSamples(unittest.TestCase):
                         '-c:v', 'rawvideo', '-pix_fmt', 'rgb24', '-f', 'rawvideo', name)
                 self.assertEqual((self.root / name).read_bytes(), b''.join(frames[i] for i in indices))
 
+    def test_input_output_seek_and_time_bounds(self):
+        frames = self.make_rgb_frames()
+        raw_input = self.raw_video_input()
+        cases = [
+            ('input-seek', ('-ss', '0.5', *raw_input), [2, 3]),
+            ('output-seek', (*raw_input, '-ss', '0.5'), [2, 3]),
+            ('input-duration', ('-t', '0.5', *raw_input), [0, 1]),
+            ('output-duration', (*raw_input, '-t', '0.5'), [0, 1]),
+            ('input-end-position', ('-to', '0.75', *raw_input), [0, 1, 2]),
+            ('output-end-position', (*raw_input, '-to', '0.75'), [0, 1, 2]),
+            ('input-seek-window', ('-ss', '0.5', '-t', '0.5', *raw_input), [2, 3]),
+            ('output-seek-window', (*raw_input, '-ss', '0.5', '-t', '0.5'), [2, 3]),
+            ('duration-takes-priority', (*raw_input, '-t', '0.25', '-to', '0.75'), [0]),
+        ]
+        for name, options, indices in cases:
+            with self.subTest(name=name):
+                self.ff(*options, '-c:v', 'rawvideo', '-pix_fmt', 'rgb24',
+                        '-f', 'rawvideo', f'{name}.rgb')
+                expected = b''.join(frames[index] for index in indices)
+                self.assertEqual((self.root / f'{name}.rgb').read_bytes(), expected)
+
     def test_video_transcode_frame_data_and_timestamps(self):
         frames = self.make_rgb_frames()
         self.ff(*self.raw_video_input(), '-vf', 'fps=2', '-fps_mode', 'passthrough',
