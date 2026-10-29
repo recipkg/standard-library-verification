@@ -30,6 +30,16 @@ class RegexSamples(unittest.TestCase):
                            capture_output=True, text=True, timeout=20)
         return p.returncode, json.loads(p.stdout)
 
+    def invoke_captures(self, pattern, text):
+        p = subprocess.run([self.adapter, '--captures', pattern, text],
+                           capture_output=True, text=True, timeout=20)
+        return p.returncode, json.loads(p.stdout)
+
+    def invoke_replace(self, mode, pattern, text, replacement):
+        p = subprocess.run([self.adapter, mode, pattern, text, replacement],
+                           capture_output=True, text=True, timeout=20)
+        return p.returncode, json.loads(p.stdout)
+
     def test_alternation_and_greed(self):
         cases = [('sam|samwise', 'samwise', [[0, 3]]),
                  ('samwise|sam', 'samwise', [[0, 7]]),
@@ -82,6 +92,41 @@ class RegexSamples(unittest.TestCase):
         self.assertEqual(self.invoke_bytes(r'\w+', data), (0, {'matches': [[1, 6]]}))
         self.assertEqual(self.invoke_bytes(r'(?-u:\w+)', data), (0, {'matches': [[1, 4]]}))
         self.assertEqual(self.invoke_bytes('(?=a)', data), (2, {'error': 'compile'}))
+
+    def test_capture_names_numbering_and_nonoverlapping_matches(self):
+        self.assertEqual(
+            self.invoke_captures(r'(?<first>[A-Z][a-z]+) (?<last>[A-Z][a-z]+)',
+                                 'Ada Lovelace; Alan Turing'),
+            (0, {'names': [None, 'first', 'last'],
+                 'captures': [[[0, 12], [0, 3], [4, 12]],
+                              [[14, 25], [14, 18], [19, 25]]]}))
+
+    def test_unmatched_optional_capture_is_null(self):
+        self.assertEqual(
+            self.invoke_captures(r'(?<letter>a)(?<optional>b)?', 'ab a'),
+            (0, {'names': [None, 'letter', 'optional'],
+                 'captures': [[[0, 2], [0, 1], [1, 2]],
+                              [[3, 4], [3, 4], None]]}))
+
+    def test_capture_ranges_use_utf8_byte_offsets(self):
+        self.assertEqual(self.invoke_captures(r'(?<word>\w+)', 'éx'),
+                         (0, {'names': [None, 'word'],
+                              'captures': [[[0, 3], [0, 3]]]}))
+
+    def test_first_and_all_replacement_expansion(self):
+        self.assertEqual(self.invoke_replace('--replace-first', r'\d+', 'a1 b22', '<$0>'),
+                         (0, {'text': 'a<1> b22'}))
+        self.assertEqual(self.invoke_replace('--replace-all', r'\d+', 'a1 b22', '<$0>'),
+                         (0, {'text': 'a<1> b<22>'}))
+        self.assertEqual(self.invoke_replace('--replace-all', r'([a-z])(\d+)',
+                                             'a12 b34', '$2:$1'),
+                         (0, {'text': '12:a 34:b'}))
+        self.assertEqual(
+            self.invoke_replace('--replace-all', r'(?<first>deep) (?<second>fried)',
+                                'deep fried', '${first}_$second|$missing|$$'),
+            (0, {'text': 'deep_fried||$'}))
+        self.assertEqual(self.invoke_replace('--replace-all', 'xyz', 'unchanged', 'x'),
+                         (0, {'text': 'unchanged'}))
 
 
 if __name__ == '__main__':
