@@ -643,6 +643,27 @@ class RipgrepSamples(unittest.TestCase):
         self.assertEqual(stdin_match['path'], {'text': '<stdin>'})
         self.assertEqual(stdin_match['lines'], {'text': 'alpha\nmiddle\n'})
 
+    def test_multiline_count_and_max_count(self):
+        (self.root / 'counts.txt').write_text(
+            'alpha alpha\nbeta alpha\nalpha\nmiddle\nalpha\nmiddle\n', encoding='utf-8')
+
+        cases = [
+            (['-c'], 'alpha', '4\n'),
+            (['--count-matches'], 'alpha', '5\n'),
+            (['-U', '-c'], 'alpha', '4\n'),
+            (['-U', '--count-matches'], 'alpha', '5\n'),
+            (['-U', '-c'], r'alpha\nmiddle', '2\n'),
+            (['-U', '--count-matches'], r'alpha\nmiddle', '2\n'),
+        ]
+        for flags, pattern, expected in cases:
+            with self.subTest(flags=flags, pattern=pattern):
+                result = self.invoke(*flags, pattern, 'counts.txt')
+                self.assertEqual((result.returncode, result.stdout), (0, expected), result.stderr)
+
+        limited = self.invoke('-U', '-m', '1', '-n', r'alpha\nmiddle', 'counts.txt')
+        self.assertEqual((limited.returncode, limited.stdout), (0, '3:alpha\n4:middle\n'),
+                         limited.stderr)
+
     def test_partial_file_error_and_quiet(self):
         result = self.invoke('-n', 'needle', 'normal.txt', 'missing.txt')
         self.assertEqual(result.returncode, 2)
