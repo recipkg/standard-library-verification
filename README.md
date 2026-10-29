@@ -52,6 +52,8 @@ Set `RECIPKG_TEST_JQ`, `RECIPKG_TEST_RG`, `RECIPKG_TEST_GIT`, `RECIPKG_TEST_FFMP
 
 When a case fails, compare the fixed upstream recipe, version, environment, and stderr before changing expected behavior. Add tests for newly observed cases and retain unresolved differences. The tests live outside Markdown-only recipe archives.
 
+For selected jq collection filters, set `RECIPKG_TEST_JQ` to the executable and run `python3 -m unittest discover -s tests -p test_jq_collections.py -v`. The example cases check mapping, empty and multiple results, keys, membership, and error behavior. Set `RECIPKG_TEST_JQ_REFERENCE` to a distinct upstream executable to also compare 1,400 fixed-seed input/filter combinations; the differential method is explicitly skipped without a reference. This is a finite sample, not full jq compatibility.
+
 For a deterministic jq differential sample of nested JSON equality, ordering, sorting, conditionals, bindings, reductions, function scope, JSON streaming, sequence recovery, relaxed literal boundaries, exact numeric output, and decimal rounding boundaries, set both `RECIPKG_TEST_JQ` and `RECIPKG_TEST_JQ_REFERENCE` to different executables and run `python3 -m unittest discover -s tests -p test_jq_differential.py -v`. The reference must be the intended jq version; the sample is not exhaustive.
 
 To exercise the actual Canvas recipe's pinned recursive dependencies and tamper detection, set `RECIPKG_TEST_CANVAS_RECIPE` to its checkout and `RECIPKG_TEST_CLI` to the selected Recipkg executable, then run `python3 -m unittest discover -s tests -p test_canvas_package.py -v`. Packing fetches the fixed Git dependencies; the temporary archives are removed afterward. This checks package context and integrity, not a rebuilt Canvas or SDK.
