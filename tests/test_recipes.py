@@ -605,6 +605,44 @@ class RipgrepSamples(unittest.TestCase):
         self.assertEqual(base64.b64decode(match['path']['bytes']), filename)
         self.assertEqual(match['lines'], {'text': 'hit\n'})
 
+    def test_multiline_matching_and_dotall(self):
+        sample = "head\nalpha\nmiddle\nomega\ntail\n"
+        (self.root / 'multiline.txt').write_text(sample, encoding='utf-8')
+
+        rejected = self.invoke('--json', r'\n', 'multiline.txt')
+        self.assertEqual(rejected.returncode, 2)
+        self.assertIn('Consider enabling multiline mode', rejected.stderr)
+
+        literal = self.invoke('-U', '-n', r'alpha\nmiddle', 'multiline.txt')
+        self.assertEqual((literal.returncode, literal.stdout), (0, '2:alpha\n3:middle\n'))
+
+        dot = self.invoke('-U', '-n', 'alpha.*omega', 'multiline.txt')
+        self.assertEqual((dot.returncode, dot.stdout), (1, ''))
+
+        dotall = self.invoke('-U', '--multiline-dotall', '-n', 'alpha.*omega', 'multiline.txt')
+        self.assertEqual((dotall.returncode, dotall.stdout),
+                         (0, '2:alpha\n3:middle\n4:omega\n'))
+
+        result = self.invoke('--json', '-U', r'alpha\nmiddle', 'multiline.txt')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        events = [json.loads(line) for line in result.stdout.splitlines()]
+        self.assertEqual([event['type'] for event in events],
+                         ['begin', 'match', 'end', 'summary'])
+        match = events[1]['data']
+        self.assertEqual(match['line_number'], 2)
+        self.assertEqual(match['lines'], {'text': 'alpha\nmiddle\n'})
+        self.assertEqual(match['submatches'],
+                         [{'match': {'text': 'alpha\nmiddle'}, 'start': 0, 'end': 12}])
+
+        stdin = command([self.rg, '--color=never', '--json', '-U', r'alpha\nmiddle'],
+                        cwd=self.root, env=self.env,
+                        input='head\nalpha\nmiddle\nomega\ntail\n')
+        self.assertEqual(stdin.returncode, 0, stdin.stderr)
+        stdin_events = [json.loads(line) for line in stdin.stdout.splitlines()]
+        stdin_match = next(event['data'] for event in stdin_events if event['type'] == 'match')
+        self.assertEqual(stdin_match['path'], {'text': '<stdin>'})
+        self.assertEqual(stdin_match['lines'], {'text': 'alpha\nmiddle\n'})
+
     def test_partial_file_error_and_quiet(self):
         result = self.invoke('-n', 'needle', 'normal.txt', 'missing.txt')
         self.assertEqual(result.returncode, 2)
