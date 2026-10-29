@@ -69,9 +69,10 @@ class JqStringSamples(unittest.TestCase):
                 self.assertEqual(json.loads(result.stdout), expected)
 
     def test_string_filter_type_errors(self):
-        cases = [('startswith("x")', 2), ('endswith("x")', None),
-                 ('ltrimstr("x")', []), ('split(",")', {}),
-                 ('join(",")', 2), ('join(",")', [['nested']])]
+        cases = [('startswith("x")', 2), ('startswith(1)', 'abc'),
+                 ('endswith("x")', None), ('ltrimstr("x")', []),
+                 ('split(",")', {}), ('split(1)', 'abc'), ('join(",")', 2),
+                 ('join(1)', []), ('join(",")', [['nested']])]
         for expression, source in cases:
             with self.subTest(expression=expression, source=source):
                 result = self.run_filter(expression, source)
