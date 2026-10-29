@@ -103,6 +103,7 @@ class JqCaptureScanSamples(unittest.TestCase):
             ('scan("(a)?(b*)"; "g")', "bb"),
             ('scan("(a)?(b*)"; "gn")', "bb"),
             ('scan("(?<x>foo)"; "ig")', "foo FOO"),
+            ('scan(("a", "b"); ("", "i"))', "ab"),
             ('scan("(a)?(b*)"; null)', "bb"),
             ('scan("(?=.)"; "g")', "aβc"),
         ]
