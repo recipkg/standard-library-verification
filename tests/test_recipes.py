@@ -920,6 +920,45 @@ class FFmpegSamples(unittest.TestCase):
                 expected = b''.join(frames[index] for index in indices)
                 self.assertEqual((self.root / f'{name}.rgb').read_bytes(), expected)
 
+    def test_input_seek_keyframe_accuracy_and_stream_copy(self):
+        frames = [bytes(value for y in range(16) for x in range(16)
+                        for value in (index * 4, x * 5, y * 5))
+                  for index in range(8)]
+        (self.root / 'gop-source.rgb').write_bytes(b''.join(frames))
+        raw_input = ('-f', 'rawvideo', '-pixel_format', 'rgb24', '-video_size', '16x16',
+                     '-framerate', '4', '-i', 'gop-source.rgb')
+        self.ff(*raw_input, '-an', '-c:v', 'mpeg2video', '-g', '8', '-bf', '0',
+                '-sc_threshold', '1000000000', '-q:v', '2', '-pix_fmt', 'yuv420p', 'gop.mkv')
+        probe = command([self.ffprobe, '-v', 'error', '-select_streams', 'v:0',
+                         '-show_entries', 'frame=key_frame', '-show_frames', '-of', 'json',
+                         'gop.mkv'], cwd=self.root)
+        self.assertEqual(probe.returncode, 0, probe.stderr)
+        keyframes = [frame['key_frame'] for frame in json.loads(probe.stdout)['frames']]
+        self.assertEqual(keyframes, [1, 0, 0, 0, 0, 0, 0, 0])
+
+        self.ff('-i', 'gop.mkv', '-fps_mode', 'passthrough', '-c:v', 'rawvideo',
+                '-pix_fmt', 'rgb24', '-f', 'rawvideo', 'baseline.rgb')
+        baseline = (self.root / 'baseline.rgb').read_bytes()
+        frame_size = 16 * 16 * 3
+        self.assertEqual(len(baseline), frame_size * 8)
+
+        self.ff('-ss', '0.5', '-i', 'gop.mkv', '-fps_mode', 'passthrough',
+                '-c:v', 'ffv1', 'accurate.mkv')
+        self.ff('-i', 'accurate.mkv', '-fps_mode', 'passthrough', '-c:v', 'rawvideo',
+                '-pix_fmt', 'rgb24', '-f', 'rawvideo', 'accurate.rgb')
+        self.assertEqual((self.root / 'accurate.rgb').read_bytes(), baseline[frame_size * 2:])
+
+        self.ff('-noaccurate_seek', '-ss', '0.5', '-i', 'gop.mkv',
+                '-fps_mode', 'passthrough', '-c:v', 'ffv1', 'inaccurate.mkv')
+        self.ff('-i', 'inaccurate.mkv', '-fps_mode', 'passthrough', '-c:v', 'rawvideo',
+                '-pix_fmt', 'rgb24', '-f', 'rawvideo', 'inaccurate.rgb')
+        self.assertEqual((self.root / 'inaccurate.rgb').read_bytes(), baseline)
+
+        self.ff('-ss', '0.5', '-i', 'gop.mkv', '-c:v', 'copy', 'stream-copy.mkv')
+        self.ff('-i', 'stream-copy.mkv', '-fps_mode', 'passthrough', '-c:v', 'rawvideo',
+                '-pix_fmt', 'rgb24', '-f', 'rawvideo', 'stream-copy.rgb')
+        self.assertEqual((self.root / 'stream-copy.rgb').read_bytes(), baseline)
+
     def test_video_transcode_frame_data_and_timestamps(self):
         frames = self.make_rgb_frames()
         self.ff(*self.raw_video_input(), '-vf', 'fps=2', '-fps_mode', 'passthrough',
