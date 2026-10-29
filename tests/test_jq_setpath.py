@@ -58,6 +58,13 @@ class JqSetpathSamples(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertTrue(result.stderr)
 
+    def test_comma_generator_emits_independent_updates(self):
+        source = {'a': 0, 'b': 0}
+        result = self.run_filter('[setpath(["a"], ["b"]; 1)]', source)
+        self.assertEqual((result.returncode, result.stderr), (0, ''))
+        self.assertEqual(json.loads(result.stdout),
+                         [{'a': 1, 'b': 0}, {'a': 0, 'b': 1}])
+
     def test_seeded_differential(self):
         reference = os.environ.get('RECIPKG_TEST_JQ_REFERENCE')
         if not reference:
