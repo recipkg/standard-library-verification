@@ -111,6 +111,7 @@ class JqModuleSamples(unittest.TestCase):
             cases = [
                 (['-n', 'include "settings.json"; .'], 3, 'JSON modules are not supported'),
                 (['-n', 'module { "name": "sample" }; .'], 3, 'module metadata is not supported'),
+                (['-n', 'module "sample"; .'], 3, 'module metadata is not supported'),
                 (['-n', 'modulemeta'], 3, 'modulemeta is not supported'),
                 (['-n', 'include "local"; .'], 3, 'default module search paths are not supported'),
             ]
@@ -119,6 +120,17 @@ class JqModuleSamples(unittest.TestCase):
                     result = self.invoke(args, cwd=root)
                     self.assertEqual((result.returncode, result.stdout), (code, ''))
                     self.assertIn(message, result.stderr)
+
+    def test_include_cycle_reports_compile_error(self):
+        with tempfile.TemporaryDirectory(prefix='recipkg-jq-modules-') as temporary:
+            root = Path(temporary)
+            library = root / 'lib'
+            library.mkdir()
+            (library / 'first.jq').write_text('include "second"; def first: 1;\n', encoding='utf-8')
+            (library / 'second.jq').write_text('include "first"; def second: 2;\n', encoding='utf-8')
+            result = self.invoke(['-n', '-L', str(library), 'include "first"; first'], cwd=root)
+            self.assertEqual((result.returncode, result.stdout), (3, ''))
+            self.assertIn('recursive module include', result.stderr)
 
 
 if __name__ == '__main__':
